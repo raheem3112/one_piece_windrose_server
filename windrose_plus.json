@@ -1,0 +1,10 @@
+{
+  "server": {
+    "http_port": 18080
+  },
+  "rcon": {
+    "enabled": true,
+    "password": "5ddzkLgM8QCWoEj2u1iSzNop"
+  },
+  "multipliers": {}
+}

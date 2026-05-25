@@ -1,0 +1,1782 @@
+﻿# Windrose+ web dashboard and REST API server (PowerShell)
+
+param(
+    [string]$GameDir = "",
+    [int]$Port = 0,
+    [string]$BindIp = ""
+)
+
+# $Version is rewritten from the git tag by .github/workflows/release.yml at
+# release time. The literal here is the development default.
+$Version = "1.3.5"
+
+# Find game directory
+function Find-GameDir {
+    $candidates = @()
+    if ($GameDir) { $candidates += $GameDir }
+    $candidates += $PWD.Path
+    $candidates += Split-Path -Parent $PSScriptRoot
+
+    foreach ($path in $candidates) {
+        if ($path -and (Test-Path -LiteralPath (Join-Path $path "windrose_plus.json"))) {
+            return (Resolve-Path $path).Path
+        }
+    }
+    return $null
+}
+
+$gameDir = Find-GameDir
+if (-not $gameDir) {
+    Write-Error "Cannot find windrose_plus.json. Run from the game server directory."
+    exit 1
+}
+
+# Load config. Retry on transient parse failures — external writers may
+# overwrite this file non-atomically and catch us mid-write during startup.
+$configPath = Join-Path $gameDir "windrose_plus.json"
+$config = $null
+for ($i = 0; $i -lt 5; $i++) {
+    try {
+        $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+        break
+    } catch {
+        if ($i -eq 4) {
+            Write-Error "Failed to parse $configPath after 5 retries: $($_.Exception.Message)"
+            exit 1
+        }
+        Start-Sleep -Milliseconds 100
+    }
+}
+
+# Find data directory
+$dataDir = Join-Path $gameDir "windrose_plus_data"
+if (-not (Test-Path -LiteralPath $dataDir)) { New-Item -ItemType Directory -Path $dataDir -Force | Out-Null }
+
+# Find web directory
+$webDir = Join-Path $PSScriptRoot "web"
+
+# Resolve port
+if ($Port -eq 0) {
+    $Port = if ($config.server.http_port) { [int]$config.server.http_port } else { 8780 }
+}
+
+if (-not $BindIp -and $config.server -and $config.server.bind_ip) {
+    $BindIp = [string]$config.server.bind_ip
+}
+$BindIp = $BindIp.Trim()
+
+$listenHost = "+"
+if ($BindIp -and $BindIp -ne "0.0.0.0" -and $BindIp -ne "*" -and $BindIp -ne "+") {
+    $listenHost = $BindIp
+}
+$displayListenHost = if ($listenHost -eq "+") { "0.0.0.0" } else { $listenHost }
+$dashboardHost = if ($listenHost -eq "+") { "localhost" } else { $listenHost }
+
+$layoutRuntimeProviderUrl = "$env:WINDROSEPLUS_LAYOUT_RUNTIME_URL".Trim()
+if (-not $layoutRuntimeProviderUrl -and $config.server -and $config.server.layout_runtime_url) {
+    $layoutRuntimeProviderUrl = ([string]$config.server.layout_runtime_url).Trim()
+}
+$layoutRuntimeProviderUrl = $layoutRuntimeProviderUrl.TrimEnd("/")
+
+# Load the INI parser used by /api/pak-status. Failure is non-fatal; the endpoint
+# degrades to a "parser unavailable" response instead of crashing the dashboard.
+$script:IniParserLoaded = $false
+$script:IniParserLoadError = $null
+$iniParserPath = Join-Path $PSScriptRoot "..\tools\lib\IniConfigParser.ps1"
+if (Test-Path -LiteralPath $iniParserPath) {
+    try {
+        . $iniParserPath
+        $script:IniParserLoaded = $true
+    } catch {
+        $script:IniParserLoadError = $_.Exception.Message
+        Write-Host "WARN: IniConfigParser.ps1 failed to load: $($_.Exception.Message). /api/pak-status CT detection degraded."
+    }
+} else {
+    $script:IniParserLoadError = "File not found: $iniParserPath"
+    Write-Host "WARN: IniConfigParser.ps1 not found at $iniParserPath. /api/pak-status CT detection degraded."
+}
+
+# Layout-fingerprint scanner. Used by /api/layout to surface the world's
+# layoutFingerprint, seed, worldPreset, and terrainPlacements.
+$script:LayoutScannerLoaded = $false
+$script:LayoutScannerLoadError = $null
+$layoutScannerPath = Join-Path $PSScriptRoot "lib\Get-LayoutFingerprint.ps1"
+if (Test-Path -LiteralPath $layoutScannerPath) {
+    try {
+        . $layoutScannerPath
+        $script:LayoutScannerLoaded = $true
+    } catch {
+        $script:LayoutScannerLoadError = $_.Exception.Message
+        Write-Host "WARN: Get-LayoutFingerprint.ps1 failed to load: $($_.Exception.Message). /api/layout unavailable."
+    }
+} else {
+    $script:LayoutScannerLoadError = "File not found: $layoutScannerPath"
+    Write-Host "WARN: Get-LayoutFingerprint.ps1 not found at $layoutScannerPath. /api/layout unavailable."
+}
+
+# Re-read the RCON password on every auth attempt instead of caching it at startup.
+# External writers (e.g. an orchestration panel) can overwrite windrose_plus.json
+# mid-session, and non-atomic writes can produce transient parse failures.
+# Retry up to 3 times; if all fail, return $null so callers can surface a retry hint.
+function Get-CurrentRconPassword {
+    $jsonPath = Join-Path $gameDir "windrose_plus.json"
+    for ($i = 0; $i -lt 3; $i++) {
+        try {
+            $cfg = Get-Content -LiteralPath $jsonPath -Raw | ConvertFrom-Json
+            if ($cfg.rcon -and $cfg.rcon.password) { return [string]$cfg.rcon.password }
+            return ""
+        } catch {
+            Start-Sleep -Milliseconds 50
+        }
+    }
+    Write-Host "WARN: Unable to parse windrose_plus.json after 3 retries"
+    return $null
+}
+
+# Re-read the full config from disk so the dashboard /api/config view reflects
+# live edits (RCON password, multipliers, public-map settings) without needing
+# a dashboard restart. Returns $null on parse failure so callers can hint a retry.
+function Get-CurrentConfig {
+    $jsonPath = Join-Path $gameDir "windrose_plus.json"
+    for ($i = 0; $i -lt 3; $i++) {
+        try {
+            return (Get-Content -LiteralPath $jsonPath -Raw | ConvertFrom-Json)
+        } catch {
+            Start-Sleep -Milliseconds 50
+        }
+    }
+    Write-Host "WARN: Unable to parse windrose_plus.json after 3 retries (Get-CurrentConfig)"
+    return $null
+}
+
+# Re-read public map settings on every request so hosts can enable, disable, or
+# rotate the optional share token without restarting the dashboard process.
+function Get-CurrentPublicMapConfig {
+    $jsonPath = Join-Path $gameDir "windrose_plus.json"
+    for ($i = 0; $i -lt 3; $i++) {
+        try {
+            $cfg = Get-Content -LiteralPath $jsonPath -Raw | ConvertFrom-Json
+            $public = $null
+            if ($cfg.livemap -and $cfg.livemap.public) { $public = $cfg.livemap.public }
+            $enabled = $false
+            $token = ""
+            if ($public) {
+                $enabled = ($public.enabled -eq $true)
+                if ($public.token) { $token = [string]$public.token }
+            }
+            return [PSCustomObject]@{
+                Enabled = $enabled
+                Token = $token
+            }
+        } catch {
+            Start-Sleep -Milliseconds 50
+        }
+    }
+    Write-Host "WARN: Unable to parse public map settings after 3 retries"
+    return $null
+}
+
+function Test-PublicMapAccess($request) {
+    $publicMap = Get-CurrentPublicMapConfig
+    if ($null -eq $publicMap) {
+        return @{ Allowed = $false; StatusCode = 503; Error = "Config temporarily unavailable, retry in a moment" }
+    }
+    if (-not $publicMap.Enabled) {
+        return @{ Allowed = $false; StatusCode = 404; Error = "Public map is not enabled" }
+    }
+    if (-not $publicMap.Token) {
+        return @{ Allowed = $true; StatusCode = 200; Error = "" }
+    }
+
+    $provided = $request.QueryString["token"]
+    if (-not $provided) { $provided = $request.Headers["X-WindrosePlus-Map-Token"] }
+    if ($provided -eq $publicMap.Token) {
+        return @{ Allowed = $true; StatusCode = 200; Error = "" }
+    }
+    return @{ Allowed = $false; StatusCode = 401; Error = "Invalid public map token" }
+}
+
+function ConvertTo-PublicLiveMapData($data) {
+    $players = @()
+    if ($data.players) {
+        foreach ($p in @($data.players)) {
+            $item = [ordered]@{}
+            if ($p.name) { $item["name"] = [string]$p.name }
+            if ($null -ne $p.x) { $item["x"] = [double]$p.x }
+            if ($null -ne $p.y) { $item["y"] = [double]$p.y }
+            if ($null -ne $p.z) { $item["z"] = [double]$p.z }
+            $players += [PSCustomObject]$item
+        }
+    }
+
+    $mobs = @()
+    if ($data.mobs) {
+        foreach ($m in @($data.mobs)) {
+            $item = [ordered]@{}
+            if ($m.name) { $item["name"] = [string]$m.name }
+            if ($null -ne $m.x) { $item["x"] = [double]$m.x }
+            if ($null -ne $m.y) { $item["y"] = [double]$m.y }
+            if ($null -ne $m.z) { $item["z"] = [double]$m.z }
+            $mobs += [PSCustomObject]$item
+        }
+    }
+
+    $nodes = @()
+    if ($data.nodes) {
+        foreach ($n in @($data.nodes)) {
+            $item = [ordered]@{}
+            if ($n.name) { $item["name"] = [string]$n.name }
+            if ($null -ne $n.x) { $item["x"] = [double]$n.x }
+            if ($null -ne $n.y) { $item["y"] = [double]$n.y }
+            if ($null -ne $n.z) { $item["z"] = [double]$n.z }
+            $nodes += [PSCustomObject]$item
+        }
+    }
+
+    $publicData = [ordered]@{
+        players = $players
+        mobs = $mobs
+        nodes = $nodes
+        player_count = $players.Count
+        mob_count = $mobs.Count
+        node_count = $nodes.Count
+        timestamp = $data.timestamp
+    }
+    if ($data.degraded) {
+        $publicData["degraded"] = $true
+        $publicData["degraded_reason"] = $data.degraded_reason
+        $publicData["cache_age_sec"] = $data.cache_age_sec
+    }
+    return [PSCustomObject]$publicData
+}
+
+function Send-PoiScanData($context) {
+    $poiFile = Join-Path $dataDir "pois.json"
+    if (Test-Path -LiteralPath $poiFile) {
+        try {
+            $data = Get-Content $poiFile -Raw | ConvertFrom-Json
+            Send-Json $context $data
+        } catch {
+            Send-Json $context @{ error = "POIScan data is not readable" } 503
+        }
+    } else {
+        Send-Json $context @{ error = "No POIScan data" } 503
+    }
+}
+
+function Get-RuntimeOverlayData {
+    $overlayFile = Join-Path $dataDir "runtime_overlay.json"
+    if (-not (Test-Path -LiteralPath $overlayFile)) {
+        return @{ Ok = $false; StatusCode = 404; Error = "No runtime overlay data" }
+    }
+    try {
+        $data = Get-Content -LiteralPath $overlayFile -Raw | ConvertFrom-Json
+        if ($data.PSObject.Properties.Name -contains "source_save_path") {
+            $data.PSObject.Properties.Remove("source_save_path")
+        }
+        return @{ Ok = $true; StatusCode = 200; Data = $data }
+    } catch {
+        return @{ Ok = $false; StatusCode = 500; Error = "Runtime overlay data is not valid JSON" }
+    }
+}
+
+# Session management — HMAC-signed tokens.
+# The secret is persisted to windrose_plus_data\dashboard_session.key so a
+# dashboard restart doesn't log everyone out. Tokens embed a password epoch
+# (first 4 bytes of SHA256(currentPassword)) so rotating the RCON password
+# invalidates outstanding sessions without invalidating the secret itself.
+function Get-OrCreateSessionSecret {
+    $keyPath = Join-Path $dataDir "dashboard_session.key"
+    if (Test-Path -LiteralPath $keyPath) {
+        try {
+            $existing = ([System.IO.File]::ReadAllText($keyPath)).Trim()
+            if ($existing.Length -ge 64) { return $existing }
+        } catch {
+            Write-Host "WARN: failed to read dashboard_session.key: $($_.Exception.Message)"
+        }
+    }
+    $bytes = New-Object byte[] 32
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
+    $secret = [System.BitConverter]::ToString($bytes).Replace("-","").ToLower()
+    try {
+        if (-not (Test-Path -LiteralPath $dataDir)) {
+            New-Item -ItemType Directory -Path $dataDir -Force | Out-Null
+        }
+        [System.IO.File]::WriteAllText($keyPath, $secret)
+    } catch {
+        Write-Host "WARN: failed to write dashboard_session.key: $($_.Exception.Message)"
+    }
+    return $secret
+}
+$sessionSecret = Get-OrCreateSessionSecret
+
+function Get-PasswordEpoch {
+    $pw = Get-CurrentRconPassword
+    if (-not $pw) { return "00000000" }
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes([string]$pw))
+    } finally {
+        $sha.Dispose()
+    }
+    return ("{0:x2}{1:x2}{2:x2}{3:x2}" -f $bytes[0], $bytes[1], $bytes[2], $bytes[3])
+}
+
+function New-SessionToken {
+    $timestamp = [long][DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+    $epoch = Get-PasswordEpoch
+    $payload = "wp_session:${epoch}:${timestamp}"
+    $hmac = New-Object System.Security.Cryptography.HMACSHA256
+    $hmac.Key = [System.Text.Encoding]::UTF8.GetBytes($sessionSecret)
+    $hash = [System.BitConverter]::ToString($hmac.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($payload))).Replace("-","").ToLower()
+    return "$payload`:$hash"
+}
+
+function Test-SessionToken($token) {
+    if (-not $token) { return $false }
+    $parts = $token -split ":"
+    if ($parts.Count -ne 4) { return $false }
+    $payload = "$($parts[0]):$($parts[1]):$($parts[2])"
+    $providedHash = $parts[3]
+    $hmac = New-Object System.Security.Cryptography.HMACSHA256
+    $hmac.Key = [System.Text.Encoding]::UTF8.GetBytes($sessionSecret)
+    $expectedHash = [System.BitConverter]::ToString($hmac.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($payload))).Replace("-","").ToLower()
+    if ($providedHash -ne $expectedHash) { return $false }
+    # Password rotation kills old sessions
+    if ($parts[1] -ne (Get-PasswordEpoch)) { return $false }
+    # Check expiry (24 hours)
+    $timestamp = [long]$parts[2]
+    $now = [long][DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+    return ($now - $timestamp) -lt 86400
+}
+
+function Get-SessionFromCookies($request) {
+    $cookieHeader = $request.Headers["Cookie"]
+    if (-not $cookieHeader) { return $null }
+    foreach ($cookie in $cookieHeader -split ";") {
+        $cookie = $cookie.Trim()
+        if ($cookie.StartsWith("wp_session=")) {
+            return $cookie.Substring(11)
+        }
+    }
+    return $null
+}
+
+# Login page HTML
+$loginPageHtml = @"
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WindrosePlus - Login</title>
+<style>
+body { background: #1a1410; color: #ede0cc; font-family: 'Segoe UI', sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
+.login-box { background: rgba(30, 22, 16, 0.9); border: 1px solid rgba(180, 140, 80, 0.3); border-radius: 8px; padding: 40px; max-width: 400px; width: 90%; text-align: center; }
+h1 { color: #d4a04a; font-size: 24px; margin: 0 0 8px; }
+p { color: #8f775d; font-size: 14px; margin: 0 0 24px; }
+input[type=password] { width: 100%; padding: 12px; background: rgba(15, 10, 8, 0.9); border: 1px solid rgba(180, 140, 80, 0.3); color: #ede0cc; border-radius: 4px; font-size: 16px; box-sizing: border-box; }
+input[type=password]:focus { outline: none; border-color: #d4a04a; }
+button { width: 100%; padding: 12px; background: #d4a04a; color: #1a1410; border: none; border-radius: 4px; font-size: 16px; font-weight: 600; cursor: pointer; margin-top: 16px; }
+button:hover { background: #e0b060; }
+.error { color: #d37d66; font-size: 13px; margin-top: 12px; display: none; }
+</style>
+</head>
+<body>
+<div class="login-box">
+<h1>WindrosePlus</h1>
+<p>Enter RCON password to access the dashboard</p>
+<form method="POST" action="/login" data-form-type="other" autocomplete="off">
+<input type="password" name="password" placeholder="RCON Password" autofocus required autocomplete="off" data-1p-ignore data-lpignore="true" data-form-type="other">
+<button type="submit">Enter</button>
+</form>
+ERRORPLACEHOLDER
+</div>
+</body>
+</html>
+"@
+
+Write-Host "WindrosePlus Server v$Version (PowerShell)"
+Write-Host "Game directory: $gameDir"
+Write-Host "Data directory: $dataDir"
+Write-Host ""
+Write-Host ("Dashboard:  http://{0}:{1}/" -f $dashboardHost, $Port)
+Write-Host ("API:        http://{0}:{1}/api/status" -f $dashboardHost, $Port)
+Write-Host ""
+
+# Start HTTP listener
+$listener = New-Object System.Net.HttpListener
+if ($listenHost -eq "+") {
+    try {
+        $listener.Prefixes.Add(("http://{0}:{1}/" -f $listenHost, $Port))
+        $listener.Start()
+        Write-Host ("Listening on {0}:{1}" -f $displayListenHost, $Port)
+    } catch {
+        Write-Host "Cannot bind to all interfaces (needs admin), trying localhost only..."
+        $listener = New-Object System.Net.HttpListener
+        $listener.Prefixes.Add(("http://localhost:{0}/" -f $Port))
+        $listener.Start()
+        Write-Host ("Listening on localhost:{0} (localhost only)" -f $Port)
+    }
+} else {
+    try {
+        $listener.Prefixes.Add(("http://{0}:{1}/" -f $listenHost, $Port))
+        $listener.Start()
+        Write-Host ("Listening on {0}:{1}" -f $displayListenHost, $Port)
+    } catch {
+        Write-Error ("Cannot bind dashboard to {0}:{1}: {2}" -f $displayListenHost, $Port, $_.Exception.Message)
+        exit 1
+    }
+}
+
+# Background tile generation watcher
+$tileGenTimer = New-Object System.Timers.Timer
+$tileGenTimer.Interval = 5000
+$tileGenTimer.AutoReset = $true
+$tileGenTrigger = Join-Path $dataDir "generate_tiles_trigger"
+$tileGenStatus = Join-Path $dataDir "map_generation_status.json"
+$tileGenScript = Join-Path $gameDir "windrose_plus\tools\generateTiles.ps1"
+if (-not (Test-Path -LiteralPath $tileGenScript)) { $tileGenScript = Join-Path $gameDir "tools\generateTiles.ps1" }
+Register-ObjectEvent $tileGenTimer Elapsed -Action {
+    if (Test-Path -LiteralPath $tileGenTrigger) {
+        Remove-Item $tileGenTrigger -Force -ErrorAction SilentlyContinue
+        if (Test-Path -LiteralPath $tileGenScript) {
+            Write-Host "Generating map tiles..."
+            try {
+                $started = [long][DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+                [System.IO.File]::WriteAllText($tileGenStatus, (@{
+                    state = "running"
+                    ts = $started
+                    script = $tileGenScript
+                } | ConvertTo-Json -Depth 100 -Compress), [System.Text.UTF8Encoding]::new($false))
+                $output = (& $tileGenScript -GameDir $gameDir 2>&1 | Out-String).Trim()
+                [System.IO.File]::WriteAllText($tileGenStatus, (@{
+                    state = "complete"
+                    ts = [long][DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+                    started_ts = $started
+                    script = $tileGenScript
+                    output = $output
+                } | ConvertTo-Json -Depth 100 -Compress), [System.Text.UTF8Encoding]::new($false))
+                Write-Host "Map tiles generated."
+            } catch {
+                $msg = $_.Exception.Message
+                [System.IO.File]::WriteAllText($tileGenStatus, (@{
+                    state = "error"
+                    ts = [long][DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+                    script = $tileGenScript
+                    error = $msg
+                } | ConvertTo-Json -Depth 100 -Compress), [System.Text.UTF8Encoding]::new($false))
+                Write-Host "Tile generation failed: $msg"
+            }
+        } else {
+            [System.IO.File]::WriteAllText($tileGenStatus, (@{
+                state = "error"
+                ts = [long][DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+                script = $tileGenScript
+                error = "generateTiles.ps1 not found"
+            } | ConvertTo-Json -Depth 100 -Compress), [System.Text.UTF8Encoding]::new($false))
+        }
+    }
+} | Out-Null
+$tileGenTimer.Start()
+
+function Send-Json($context, $data, $statusCode = 200) {
+    $json = if ($null -eq $data) { '{}' } else { $data | ConvertTo-Json -Depth 100 -Compress }
+    if ([string]::IsNullOrEmpty($json)) { $json = '{}' }
+    $buffer = [System.Text.Encoding]::UTF8.GetBytes($json)
+    $context.Response.StatusCode = $statusCode
+    $context.Response.ContentType = "application/json"
+    $context.Response.Headers.Add("Access-Control-Allow-Origin", "*")
+    $context.Response.ContentLength64 = $buffer.Length
+    $context.Response.OutputStream.Write($buffer, 0, $buffer.Length)
+    $context.Response.Close()
+}
+
+function Write-AtomicUtf8Json($path, $data) {
+    $tmpPath = "$path.tmp"
+    $json = $data | ConvertTo-Json -Depth 100 -Compress
+    [System.IO.File]::WriteAllText($tmpPath, $json, [System.Text.UTF8Encoding]::new($false))
+    if (Test-Path -LiteralPath $path) {
+        Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+    }
+    Move-Item -LiteralPath $tmpPath -Destination $path -Force
+}
+
+# --- Terrain heightmap sampling (for click-to-teleport on the SEA CHART) ---
+# The dashboard already has full elevation data exported by HeightmapExporter:
+#   windrose_plus_data/terrain_v17.json   — manifest of components (wx, wy, minZ, maxZ, res, file)
+#   windrose_plus_data/heightmaps/*.bin   — uint16 heightfield grids per component
+# Component binary format: int32 res, then res*res uint16 samples.
+# Sample formula: worldZ = minZ + (raw / 65535) * (maxZ - minZ).
+# Components with maxZ < 100 are ocean floor (per generateTiles.ps1's seaLevelThreshold);
+# we skip those so a click over ocean falls back to "preserve current Z" rather than
+# teleporting the player to the sea floor.
+$script:TerrainCacheReady = $false
+$script:TerrainLandComps = $null
+
+function Initialize-TerrainCache($DataDir) {
+    if ($script:TerrainCacheReady) { return $true }
+    $jsonPath = Join-Path $DataDir "terrain_v17.json"
+    if (-not (Test-Path -LiteralPath $jsonPath)) { return $false }
+    try {
+        $meta = Get-Content $jsonPath -Raw | ConvertFrom-Json
+    } catch { return $false }
+
+    # Per-landscape step (delta between consecutive sx values; defines compW = step * scale)
+    $byLand = @{}
+    foreach ($c in $meta.components) {
+        $li = [string]$c.l
+        if (-not $byLand.ContainsKey($li)) { $byLand[$li] = @() }
+        $byLand[$li] += $c
+    }
+    $landSteps = @{}
+    foreach ($li in $byLand.Keys) {
+        $sxs = @($byLand[$li] | ForEach-Object { $_.sx } | Sort-Object -Unique)
+        if ($sxs.Count -gt 1) { $landSteps[$li] = $sxs[1] - $sxs[0] }
+        else { $landSteps[$li] = 255 }
+    }
+
+    $comps = New-Object System.Collections.Generic.List[object]
+    foreach ($c in $meta.components) {
+        if ($c.h -ne 1) { continue }
+        $maxZ = if ($null -ne $c.maxZ) { [double]$c.maxZ } else { 1.0 }
+        if ($maxZ -lt 100) { continue }  # ocean floor — skip
+        $li = [string]$c.l
+        $land = $meta.landscapes[$c.l]
+        $scale = if ($land.sx -gt 0) { [double]$land.sx } else { 100.0 }
+        $step = if ($landSteps.ContainsKey($li)) { [double]$landSteps[$li] } else { 255.0 }
+        $compW = $step * $scale
+        $minZ = if ($null -ne $c.minZ) { [double]$c.minZ } else { 0.0 }
+        $comps.Add([PSCustomObject]@{
+            wx = [double]$c.wx
+            wy = [double]$c.wy
+            wx2 = [double]$c.wx + $compW
+            wy2 = [double]$c.wy + $compW
+            res = [int]$c.res
+            minZ = $minZ
+            maxZ = $maxZ
+            f = [string]$c.f
+        }) | Out-Null
+    }
+    $script:TerrainLandComps = $comps
+    $script:TerrainCacheReady = $true
+    return $true
+}
+
+function Get-TerrainHeightAt($DataDir, [double]$WorldX, [double]$WorldY) {
+    if (-not (Initialize-TerrainCache $DataDir)) { return $null }
+    foreach ($c in $script:TerrainLandComps) {
+        if ($WorldX -ge $c.wx -and $WorldX -lt $c.wx2 -and $WorldY -ge $c.wy -and $WorldY -lt $c.wy2) {
+            $hfPath = Join-Path $DataDir "heightmaps\$($c.f)"
+            if (-not (Test-Path -LiteralPath $hfPath)) { return $null }
+            try {
+                $bytes = [System.IO.File]::ReadAllBytes($hfPath)
+                if ($bytes.Length -lt 8) { return $null }
+                $res = [BitConverter]::ToInt32($bytes, 0)
+                if ($res -le 0 -or $res -ne $c.res) { return $null }
+                $compW = $c.wx2 - $c.wx
+                $fx = ($WorldX - $c.wx) / $compW
+                $fy = ($WorldY - $c.wy) / $compW
+                $hx = [int][Math]::Floor($fx * $res)
+                $hy = [int][Math]::Floor($fy * $res)
+                if ($hx -lt 0) { $hx = 0 } elseif ($hx -ge $res) { $hx = $res - 1 }
+                if ($hy -lt 0) { $hy = 0 } elseif ($hy -ge $res) { $hy = $res - 1 }
+                $byteOff = 4 + ($hy * $res + $hx) * 2
+                if ($byteOff + 1 -ge $bytes.Length) { return $null }
+                $raw = [BitConverter]::ToUInt16($bytes, $byteOff)
+                $z = $c.minZ + ($raw / 65535.0) * ($c.maxZ - $c.minZ)
+                return $z
+            } catch { return $null }
+        }
+    }
+    return $null
+}
+
+# --- Layout fingerprint discovery + cache ---
+# Find the leaf folder directly containing the most .sst files (the active
+# RocksDB world dir). Walks SaveProfiles recursively because the path layout
+# varies by Windrose version (e.g. <profile>\Worlds\<id>\RocksDB\0.10.0\Players).
+function Find-ActiveWorldFolder {
+    $saveRoot = Join-Path $gameDir "R5\Saved\SaveProfiles"
+    if (-not (Test-Path -LiteralPath $saveRoot)) { return $null }
+
+    $byDir = @{}
+    Get-ChildItem -LiteralPath $saveRoot -Recurse -Filter '*.sst' -File -ErrorAction SilentlyContinue | ForEach-Object {
+        $d = $_.DirectoryName
+        if ($byDir.ContainsKey($d)) { $byDir[$d] = $byDir[$d] + 1 } else { $byDir[$d] = 1 }
+    }
+    if ($byDir.Count -eq 0) { return $null }
+
+    $best = $byDir.GetEnumerator() | Sort-Object -Property Value -Descending | Select-Object -First 1
+    return $best.Key
+}
+
+# Fast manifest hash that captures only file names + mtimes, used to invalidate
+# the cached layout scan when RocksDB compaction changes the .sst file set.
+function Get-LayoutCacheKey($worldFolder) {
+    if (-not $worldFolder -or -not (Test-Path -LiteralPath $worldFolder)) { return $null }
+    $entries = Get-ChildItem -LiteralPath $worldFolder -Recurse -Filter '*.sst' -ErrorAction SilentlyContinue -File |
+        Sort-Object FullName |
+        ForEach-Object { "{0}|{1}|{2}" -f $_.Name, $_.Length, $_.LastWriteTimeUtc.Ticks }
+    if (-not $entries) { return $null }
+    $joined = ($entries -join "`n")
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($joined))
+        return -join ($bytes | ForEach-Object { $_.ToString('x2') })
+    } finally { $sha.Dispose() }
+}
+
+# Strip Windows-style absolute paths from any string before it crosses the
+# unauthenticated /api/layout boundary. Used on every error message that may
+# include $layoutScannerPath, $worldFolder, scanner exceptions, etc. The
+# regex matches drive-letter paths with no path-separator backslash escaped:
+# in a PowerShell single-quoted string, '\\' is a literal two-char backslash
+# pair, which becomes a single '\' in the .NET regex (which matches one '\').
+function Sanitize-PathInMessage([string]$s) {
+    if ([string]::IsNullOrEmpty($s)) { return $s }
+    return [regex]::Replace($s, '[A-Za-z]:\\[^\s,;)\]"]*', '<path>')
+}
+
+function Get-PublicScanView($scan) {
+    if (-not $scan) { return $null }
+    return [pscustomobject]@{
+        layoutFingerprint      = $scan.layoutFingerprint
+        shortLayoutFingerprint = $scan.shortLayoutFingerprint
+        seed                   = $scan.seed
+        worldPreset            = $scan.worldPreset
+        terrainPlacements      = $scan.terrainPlacements
+        sstFileCount           = $scan.sstFileCount
+    }
+}
+
+function Get-CachedLayoutScan {
+    $worldFolder = Find-ActiveWorldFolder
+    if (-not $worldFolder) {
+        return @{ ok = $false; error = "No SaveProfiles world folder with .sst files found yet. Join the server once so it writes a save." }
+    }
+
+    $cacheKey = Get-LayoutCacheKey $worldFolder
+    if (-not $cacheKey) {
+        return @{ ok = $false; error = "World folder has no .sst files yet. Join the server once so it writes a save." }
+    }
+
+    $cachePath = Join-Path $dataDir "layout_scan.json"
+    if (Test-Path -LiteralPath $cachePath) {
+        try {
+            $cached = Get-Content -LiteralPath $cachePath -Raw -ErrorAction Stop | ConvertFrom-Json
+            if ($cached.cacheKey -eq $cacheKey -and $cached.scan) {
+                return @{ ok = $true; cached = $true; scan = $cached.scan; cachedAt = $cached.cachedAt }
+            }
+        } catch {
+            # fall through and re-scan
+        }
+    }
+
+    if (-not $script:LayoutScannerLoaded) {
+        return @{ ok = $false; error = "Layout scanner not loaded: " + (Sanitize-PathInMessage $script:LayoutScannerLoadError) }
+    }
+
+    try {
+        $scan = Get-WindroseLayoutScan -Path $worldFolder
+    } catch {
+        # sanitize: scanner errors may include the on-disk path
+        return @{ ok = $false; error = "Scanner failed: " + (Sanitize-PathInMessage $_.Exception.Message) }
+    }
+
+    $now = [long][DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+    $envelope = [pscustomobject]@{
+        cacheKey = $cacheKey
+        cachedAt = $now
+        scan     = $scan
+    }
+    try {
+        Write-AtomicUtf8Json $cachePath $envelope
+    } catch {
+        Write-Host "WARN: failed to write layout_scan.json cache: $($_.Exception.Message)"
+    }
+    return @{ ok = $true; cached = $false; scan = $scan; cachedAt = $now }
+}
+
+# POST the local scan to an optional layout-runtime provider, then GET the
+# runtime overlay (markers, biome polygons, manual POIs, quest popups). Cached
+# locally by layoutFingerprint so repeat map loads are cheap.
+function Get-CachedLayoutRuntime($scan) {
+    if (-not $scan -or -not $scan.layoutFingerprint) {
+        return @{ ok = $false; error = "Scanner result missing layoutFingerprint" }
+    }
+    if (-not $layoutRuntimeProviderUrl) {
+        return @{ ok = $false; error = "Layout runtime provider is not configured" }
+    }
+    $fp = [string]$scan.layoutFingerprint
+    $runtimeCachePath = Join-Path $dataDir "layout_runtime.json"
+
+    if (Test-Path -LiteralPath $runtimeCachePath) {
+        try {
+            $cached = Get-Content -LiteralPath $runtimeCachePath -Raw -ErrorAction Stop | ConvertFrom-Json
+            if ($cached.layoutFingerprint -eq $fp -and $cached.runtime) {
+                return @{ ok = $true; cached = $true; runtime = $cached.runtime; fetchedAt = $cached.fetchedAt }
+            }
+        } catch {
+            # fall through and re-fetch
+        }
+    }
+
+    $runtime = $null
+    $fetchedFrom = $null
+    $shouldPost = $false
+    try {
+        $resp = Invoke-WebRequest -Uri ("{0}?layout={1}" -f $layoutRuntimeProviderUrl, $fp) `
+            -Method Get -TimeoutSec 25 -UseBasicParsing -ErrorAction Stop
+        if ($resp.StatusCode -eq 200 -and $resp.Content) {
+            $runtime = $resp.Content | ConvertFrom-Json
+            $fetchedFrom = "GET"
+        }
+    } catch {
+        # 4xx = upstream rejected our query for this fingerprint (404 not found,
+        # 400 bad-request, etc.) — POST our scan to seed it.
+        # 5xx / 429 / network timeout = upstream is degraded — fall through to
+        # stale cache rather than amplifying load.
+        $statusCode = 0
+        try { $statusCode = [int]$_.Exception.Response.StatusCode } catch {}
+        if ($statusCode -ge 400 -and $statusCode -lt 500) { $shouldPost = $true }
+        else {
+            # serve stale cache if we have any
+            if (Test-Path -LiteralPath $runtimeCachePath) {
+                try {
+                    $stale = Get-Content -LiteralPath $runtimeCachePath -Raw -ErrorAction Stop | ConvertFrom-Json
+                    if ($stale.runtime -and $stale.layoutFingerprint -eq $fp) {
+                        return @{ ok = $true; cached = $true; stale = $true; runtime = $stale.runtime; fetchedAt = $stale.fetchedAt; fetchedFrom = "stale-on-upstream-fail" }
+                    }
+                } catch {}
+            }
+            return @{ ok = $false; error = "Layout runtime provider GET failed (HTTP $statusCode); no stale cache available" }
+        }
+    }
+
+    if (-not $runtime -and $shouldPost) {
+        try {
+            $body = ([pscustomobject]@{
+                layoutFingerprint = $fp
+                seed              = $scan.seed
+                worldPreset       = $scan.worldPreset
+                terrainPlacements = $scan.terrainPlacements
+            }) | ConvertTo-Json -Depth 10 -Compress
+            $resp = Invoke-WebRequest -Uri $layoutRuntimeProviderUrl -Method Post `
+                -Body $body -ContentType "application/json" -TimeoutSec 30 -UseBasicParsing -ErrorAction Stop
+            if ($resp.StatusCode -eq 200 -or $resp.StatusCode -eq 201) {
+                if ($resp.Content) {
+                    $runtime = $resp.Content | ConvertFrom-Json
+                } else {
+                    $resp2 = Invoke-WebRequest -Uri ("{0}?layout={1}" -f $layoutRuntimeProviderUrl, $fp) `
+                        -Method Get -TimeoutSec 25 -UseBasicParsing -ErrorAction Stop
+                    if ($resp2.StatusCode -eq 200 -and $resp2.Content) {
+                        $runtime = $resp2.Content | ConvertFrom-Json
+                    }
+                }
+                $fetchedFrom = "POST"
+            }
+        } catch {
+            # POST also failed (5xx / 429 / timeout). Serve stale cache if we
+            # have any, else return a friendly error. This avoids hammering
+            # the upstream with POSTs every poll while it's degraded.
+            if (Test-Path -LiteralPath $runtimeCachePath) {
+                try {
+                    $stale = Get-Content -LiteralPath $runtimeCachePath -Raw -ErrorAction Stop | ConvertFrom-Json
+                    if ($stale.runtime -and $stale.layoutFingerprint -eq $fp) {
+                        return @{ ok = $true; cached = $true; stale = $true; runtime = $stale.runtime; fetchedAt = $stale.fetchedAt; fetchedFrom = "stale-on-post-fail" }
+                    }
+                } catch {}
+            }
+            return @{ ok = $false; error = "Layout runtime provider POST failed (no stale cache): " + (Sanitize-PathInMessage $_.Exception.Message) }
+        }
+    }
+
+    if (-not $runtime) {
+        # GET 404 + POST returned non-2xx without throwing. Treat same as POST
+        # failure: serve stale if available, else surface no-data.
+        if (Test-Path -LiteralPath $runtimeCachePath) {
+            try {
+                $stale = Get-Content -LiteralPath $runtimeCachePath -Raw -ErrorAction Stop | ConvertFrom-Json
+                if ($stale.runtime) {
+                    return @{ ok = $true; cached = $true; stale = $true; runtime = $stale.runtime; fetchedAt = $stale.fetchedAt; fetchedFrom = "stale-on-no-data" }
+                }
+            } catch {}
+        }
+        return @{ ok = $false; error = "Layout runtime provider returned no runtime data for fingerprint $fp" }
+    }
+
+    $now = [long][DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+    $envelope = [pscustomobject]@{
+        layoutFingerprint = $fp
+        fetchedAt         = $now
+        fetchedFrom       = $fetchedFrom
+        runtime           = $runtime
+    }
+    try {
+        Write-AtomicUtf8Json $runtimeCachePath $envelope
+    } catch {
+        Write-Host "WARN: failed to write layout_runtime.json cache: $($_.Exception.Message)"
+    }
+    return @{ ok = $true; cached = $false; runtime = $runtime; fetchedAt = $now; fetchedFrom = $fetchedFrom }
+}
+
+function Get-RconWorkerDiagnostic($spoolDir, $cmdPath) {
+    $statusPath = Join-Path $dataDir "rcon_status.json"
+    $now = [long][DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+    $status = $null
+    $age = $null
+
+    if (Test-Path -LiteralPath $statusPath) {
+        try {
+            $status = Get-Content -LiteralPath $statusPath -Raw | ConvertFrom-Json
+            if ($null -ne $status.ts) { $age = $now - [long]$status.ts }
+        } catch {
+            return "Command timed out (25s). RCON worker status exists but could not be parsed; restart the Windrose server."
+        }
+    } else {
+        return "Command timed out (25s). RCON worker status file is missing; the Windrose+ Lua worker is not running or RCON is disabled in the game process."
+    }
+
+    $detail = ""
+    if ($status.state -or $status.detail) {
+        $detail = " Worker state: $($status.state); detail: $($status.detail)"
+    }
+    if ($status.last_error) {
+        $detail += " Last worker error: $($status.last_error)"
+    }
+
+    if ($null -ne $age -and $age -gt 15) {
+        return "Command timed out (25s). RCON worker heartbeat is stale (${age}s old); restart the Windrose server process.$detail"
+    }
+
+    if (Test-Path -LiteralPath $cmdPath) {
+        return "Command timed out (25s). RCON worker is alive but did not consume the command file; check windrose_plus_data\\rcon and restart the Windrose server if it persists.$detail"
+    }
+
+    return "Command timed out (25s). RCON worker consumed the command but did not write a response.$detail"
+}
+
+function Send-Html($context, $html, $statusCode = 200) {
+    $buffer = [System.Text.Encoding]::UTF8.GetBytes($html)
+    $context.Response.StatusCode = $statusCode
+    $context.Response.ContentType = "text/html; charset=utf-8"
+    $context.Response.ContentLength64 = $buffer.Length
+    $context.Response.OutputStream.Write($buffer, 0, $buffer.Length)
+    $context.Response.Close()
+}
+
+function Send-Redirect($context, $location) {
+    $context.Response.StatusCode = 302
+    $context.Response.RedirectLocation = $location
+    $context.Response.Close()
+}
+
+function Send-File($context, $filePath) {
+    if (-not (Test-Path -LiteralPath $filePath)) {
+        $context.Response.StatusCode = 404
+        $context.Response.Close()
+        return
+    }
+    $content = [System.IO.File]::ReadAllBytes($filePath)
+    $ext = [System.IO.Path]::GetExtension($filePath).ToLower()
+    $mimeTypes = @{
+        ".html" = "text/html"; ".css" = "text/css"; ".js" = "application/javascript"
+        ".json" = "application/json"; ".png" = "image/png"; ".jpg" = "image/jpeg"
+        ".svg" = "image/svg+xml"; ".ico" = "image/x-icon"; ".webp" = "image/webp"
+        ".woff2" = "font/woff2"; ".woff" = "font/woff"; ".ttf" = "font/ttf"
+    }
+    $mime = if ($mimeTypes[$ext]) { $mimeTypes[$ext] } else { "application/octet-stream" }
+    $context.Response.ContentType = $mime
+    $context.Response.ContentLength64 = $content.Length
+    $context.Response.OutputStream.Write($content, 0, $content.Length)
+    $context.Response.Close()
+}
+
+function Send-DownloadFile($context, $filePath, $downloadName, $contentType = "application/octet-stream") {
+    if (-not (Test-Path -LiteralPath $filePath)) {
+        $context.Response.StatusCode = 404
+        $context.Response.Close()
+        return
+    }
+    $fileInfo = Get-Item -LiteralPath $filePath
+    $buffer = New-Object byte[] 65536
+    $stream = [System.IO.File]::OpenRead($filePath)
+    $context.Response.StatusCode = 200
+    $context.Response.ContentType = $contentType
+    $context.Response.Headers.Add("Content-Disposition", "attachment; filename=`"$downloadName`"")
+    $context.Response.Headers.Add("Cache-Control", "no-store")
+    $context.Response.ContentLength64 = $fileInfo.Length
+    try {
+        while (($read = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+            $context.Response.OutputStream.Write($buffer, 0, $read)
+        }
+    } finally {
+        $stream.Close()
+        $context.Response.Close()
+    }
+}
+
+function Read-RequestBodyToFile($context, $targetPath, $maxBytes) {
+    $total = 0L
+    $buffer = New-Object byte[] 65536
+    $stream = [System.IO.File]::Open($targetPath, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+    try {
+        while (($read = $context.Request.InputStream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+            $total += $read
+            if ($total -gt $maxBytes) {
+                throw "Upload exceeds the $([Math]::Round($maxBytes / 1MB)) MB limit."
+            }
+            $stream.Write($buffer, 0, $read)
+        }
+    } finally {
+        $stream.Close()
+    }
+    return $total
+}
+
+function Format-RepairToolOutput($output, $repairRoot) {
+    $text = (($output | ForEach-Object { "$_" }) -join "`n").Trim()
+    if ($text -match "spent or allocated progression nodes|spent points detected") {
+        return "The uploaded save has spent or allocated progression nodes, so Safe mode declined to auto-edit it. Send the same SaveProfiles zip to your server admin or hosting support so they can run the deeper repair manually."
+    }
+    if ($text -match "no repairable progression drift") {
+        return "No known no-spend progression drift was found in the uploaded save."
+    }
+    if ($text -match "could not find SaveProfiles|could not resolve Players RocksDB|no PlayerId") {
+        return "The zip did not contain a supported SaveProfiles/<steamid>/RocksDB/0.10.0/Players folder."
+    }
+    if ($text -match "zip has too many entries|zip entry is too large|zip extracted size is too large|unsafe zip entry path|open zip archive") {
+        return "The upload is not a safe supported SaveProfiles zip. Recreate the zip from only your local SteamID profile folder."
+    }
+    if ($text -match "round-trip mismatch|decode BSON|R5BLPlayer|column family|missing or invalid tree path|tree path is not an array|tree node") {
+        return "The player save shape was not recognized, so no automatic repair was made."
+    }
+    if ($text -match "timed out") {
+        return "Repair timed out before a safe result was produced."
+    }
+    if ($text -match "Upload exceeds") {
+        return "The uploaded zip is larger than the 200 MB limit."
+    }
+    return "The repair tool could not safely repair this zip."
+}
+
+function Invoke-RepairTool($healExe, $auditLog, $uploadPath, $outputPath, $timeoutSeconds) {
+    $job = Start-Job -ScriptBlock {
+        param($exe, $audit, $inputZip, $repairedZip)
+        $toolOutput = & $exe --log-level warn --audit-log $audit repair-zip --input $inputZip --output $repairedZip --strategy safe 2>&1
+        $toolExitCode = $LASTEXITCODE
+        [pscustomobject]@{
+            ExitCode = $toolExitCode
+            Output = (($toolOutput | ForEach-Object { "$_" }) -join "`n")
+        }
+    } -ArgumentList $healExe, $auditLog, $uploadPath, $outputPath
+    try {
+        $done = Wait-Job $job -Timeout $timeoutSeconds
+        if (-not $done) {
+            Stop-Job $job -ErrorAction SilentlyContinue
+            return @{ ExitCode = -1; Output = "repair timed out" }
+        }
+        $result = Receive-Job $job
+        if (-not $result) {
+            return @{ ExitCode = -1; Output = "repair produced no result" }
+        }
+        return @{ ExitCode = [int]$result.ExitCode; Output = [string]$result.Output }
+    } finally {
+        Remove-Job $job -Force -ErrorAction SilentlyContinue
+    }
+}
+
+try {
+    while ($listener.IsListening) {
+        $context = $listener.GetContext()
+        $path = $context.Request.Url.AbsolutePath.TrimEnd("/")
+        $method = $context.Request.HttpMethod
+
+        try {
+            if ($method -eq "OPTIONS") {
+                $context.Response.Headers.Add("Access-Control-Allow-Origin", "*")
+                $context.Response.Headers.Add("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+                $context.Response.Headers.Add("Access-Control-Allow-Headers", "Content-Type, X-RCON-Password")
+                $context.Response.StatusCode = 200
+                $context.Response.Close()
+                continue
+            }
+
+            # Login page — no auth required
+            if ($path -eq "/login") {
+                $currentPassword = Get-CurrentRconPassword
+                if ($method -eq "POST") {
+                    $reader = New-Object System.IO.StreamReader($context.Request.InputStream)
+                    $body = $reader.ReadToEnd()
+                    $formPassword = ""
+                    # Accept both application/x-www-form-urlencoded (browser <form>) and
+                    # multipart/form-data (curl -F, some HTTP clients). The HTML form
+                    # itself is urlencoded, but the field name + value are identical, so
+                    # supporting both keeps scripted callers like `curl -F password=...`
+                    # working without forcing them to switch to --data.
+                    $contentType = ""
+                    if ($context.Request.ContentType) { $contentType = $context.Request.ContentType }
+                    if ($contentType -match "(?i)^multipart/form-data") {
+                        $boundary = $null
+                        if ($contentType -match "(?i)boundary=(?:""([^""]+)""|([^;]+))") {
+                            $boundary = if ($matches[1]) { $matches[1].Trim() } else { $matches[2].Trim() }
+                        }
+                        if ($boundary) {
+                            $parts = $body -split [regex]::Escape("--$boundary")
+                            foreach ($part in $parts) {
+                                if ($part -notmatch '(?i)Content-Disposition:[^\r\n]*name="password"') { continue }
+                                $headerEnd = $part.IndexOf("`r`n`r`n")
+                                $sepLen = 4
+                                if ($headerEnd -lt 0) {
+                                    $headerEnd = $part.IndexOf("`n`n")
+                                    $sepLen = 2
+                                }
+                                if ($headerEnd -lt 0) { continue }
+                                $valStart = $headerEnd + $sepLen
+                                if ($valStart -ge $part.Length) { continue }
+                                $val = $part.Substring($valStart)
+                                # Strip the trailing CRLF that precedes the next boundary delimiter.
+                                $val = $val -replace "(\r\n|\r|\n)+$", ""
+                                $formPassword = $val
+                                break
+                            }
+                        }
+                    } else {
+                        foreach ($pair in $body -split "&") {
+                            $kv = $pair -split "=", 2
+                            if ($kv[0] -eq "password") {
+                                $formPassword = [System.Uri]::UnescapeDataString($kv[1].Replace("+", " "))
+                            }
+                        }
+                    }
+                    if ($null -eq $currentPassword) {
+                        $errorHtml = $loginPageHtml.Replace("ERRORPLACEHOLDER", '<div class="error" style="display:block">Config temporarily unavailable — retry in a moment</div>')
+                        Send-Html $context $errorHtml
+                    } elseif (-not $currentPassword) {
+                        $errorHtml = $loginPageHtml.Replace("ERRORPLACEHOLDER", '<div class="error" style="display:block">Set a password in windrose_plus.json to access the dashboard</div>')
+                        Send-Html $context $errorHtml
+                    } elseif ($currentPassword -eq "changeme") {
+                        $errorHtml = $loginPageHtml.Replace("ERRORPLACEHOLDER", '<div class="error" style="display:block">Change the default password in windrose_plus.json</div>')
+                        Send-Html $context $errorHtml
+                    } elseif ($formPassword -eq $currentPassword) {
+                        $token = New-SessionToken
+                        $context.Response.Headers.Add("Set-Cookie", "wp_session=$token; Path=/; Max-Age=86400; HttpOnly; SameSite=Lax")
+                        Send-Redirect $context "/"
+                    } else {
+                        $errorHtml = $loginPageHtml.Replace("ERRORPLACEHOLDER", '<div class="error" style="display:block">Invalid password</div>')
+                        Send-Html $context $errorHtml
+                    }
+                } else {
+                    if ($null -eq $currentPassword) {
+                        $errorMsg = '<div class="error" style="display:block">Config temporarily unavailable — retry in a moment</div>'
+                    } elseif (-not $currentPassword) {
+                        $errorMsg = '<div class="error" style="display:block">Set a password in windrose_plus.json to access the dashboard</div>'
+                    } elseif ($currentPassword -eq "changeme") {
+                        $errorMsg = '<div class="error" style="display:block">Change the default password in windrose_plus.json</div>'
+                    } else {
+                        $errorMsg = ""
+                    }
+                    $html = $loginPageHtml.Replace("ERRORPLACEHOLDER", $errorMsg)
+                    Send-Html $context $html
+                }
+                continue
+            }
+
+            # API health endpoint — no auth (used for monitoring)
+            if ($path -eq "/api/health") {
+                Send-Json $context @{ status = "ok"; version = $Version; timestamp = [long][DateTimeOffset]::UtcNow.ToUnixTimeSeconds() }
+                continue
+            }
+
+            # Static game-catalog assets (item metadata + icons) — no auth.
+            # This is generic Windrose game data, identical on every server,
+            # no player or server identifying information. Letting public
+            # Sea Chart viewers see the catalog overlay is the whole point.
+            if ($path.StartsWith("/catalog/")) {
+                $catalogRoot = [System.IO.Path]::GetFullPath((Join-Path $webDir "catalog"))
+                $candidate   = [System.IO.Path]::GetFullPath((Join-Path $webDir ($path.TrimStart("/").Replace("/", "\"))))
+                $sep         = [System.IO.Path]::DirectorySeparatorChar
+                if (-not $candidate.StartsWith($catalogRoot + $sep, [System.StringComparison]::OrdinalIgnoreCase)) {
+                    $context.Response.StatusCode = 403
+                    $context.Response.Close()
+                    continue
+                }
+                Send-File $context $candidate
+                continue
+            }
+
+            # Optional public Sea Chart. This deliberately exposes only the map
+            # manifest, livemap snapshot, and generated tiles. Dashboard, RCON,
+            # config, repair, status, and terrain-height routes still require
+            # the normal authenticated dashboard session above.
+            if ($path -eq "/public-map" -or $path.StartsWith("/api/public/") -or $path.StartsWith("/public-map/tiles/")) {
+                $publicAccess = Test-PublicMapAccess $context.Request
+                if (-not $publicAccess.Allowed) {
+                    if ($path.StartsWith("/api/")) {
+                        Send-Json $context @{ error = $publicAccess.Error } $publicAccess.StatusCode
+                    } else {
+                        Send-Html $context ("<html><body>{0}</body></html>" -f [System.Net.WebUtility]::HtmlEncode($publicAccess.Error)) $publicAccess.StatusCode
+                    }
+                    continue
+                }
+
+                if ($path -eq "/public-map") {
+                    Send-File $context (Join-Path $webDir "livemap\index.html")
+                    continue
+                }
+
+                if ($path -eq "/api/public/livemap") {
+                    $mapFile = Join-Path $dataDir "livemap_data.json"
+                    if (Test-Path -LiteralPath $mapFile) {
+                        $data = Get-Content $mapFile -Raw | ConvertFrom-Json
+                        Send-Json $context (ConvertTo-PublicLiveMapData $data)
+                    } else {
+                        Send-Json $context @{ error = "No livemap data" } 503
+                    }
+                    continue
+                }
+
+                if ($path -eq "/api/public/pois") {
+                    Send-PoiScanData $context
+                    continue
+                }
+
+                if ($path -eq "/api/public/runtime-overlay") {
+                    $overlay = Get-RuntimeOverlayData
+                    if ($overlay.Ok) {
+                        Send-Json $context $overlay.Data
+                    } else {
+                        Send-Json $context @{ error = $overlay.Error } $overlay.StatusCode
+                    }
+                    continue
+                }
+
+                if ($path -eq "/api/public/layout") {
+                    $r = Get-CachedLayoutScan
+                    if ($r.ok) {
+                        Send-Json $context @{
+                            ok       = $true
+                            cached   = $r.cached
+                            cachedAt = $r.cachedAt
+                            scan     = (Get-PublicScanView $r.scan)
+                        }
+                    } else {
+                        Send-Json $context @{ ok = $false; error = $r.error } 503
+                    }
+                    continue
+                }
+
+                if ($path -eq "/api/public/layout/runtime") {
+                    $scanResult = Get-CachedLayoutScan
+                    if (-not $scanResult.ok) {
+                        Send-Json $context @{ ok = $false; error = $scanResult.error } 503
+                        continue
+                    }
+                    $runtimeResult = Get-CachedLayoutRuntime $scanResult.scan
+                    if ($runtimeResult.ok) {
+                        Send-Json $context @{
+                            ok                = $true
+                            layoutFingerprint = $scanResult.scan.layoutFingerprint
+                            seed              = $scanResult.scan.seed
+                            worldPreset       = $scanResult.scan.worldPreset
+                            cached            = $runtimeResult.cached
+                            stale             = ($runtimeResult.stale -eq $true)
+                            fetchedAt         = $runtimeResult.fetchedAt
+                            fetchedFrom       = $runtimeResult.fetchedFrom
+                            runtime           = $runtimeResult.runtime
+                        }
+                    } else {
+                        Send-Json $context @{
+                            ok                = $false
+                            layoutFingerprint = $scanResult.scan.layoutFingerprint
+                            error             = $runtimeResult.error
+                        } 503
+                    }
+                    continue
+                }
+
+                if ($path -eq "/api/public/mapinfo") {
+                    $mapCoordsFile = Join-Path $dataDir "map_coords.json"
+                    if (Test-Path -LiteralPath $mapCoordsFile) {
+                        $data = Get-Content $mapCoordsFile -Raw | ConvertFrom-Json
+                        Send-Json $context $data
+                    } else {
+                        $generation = $null
+                        $statusFile = Join-Path $dataDir "map_generation_status.json"
+                        if (Test-Path -LiteralPath $statusFile) {
+                            try { $generation = Get-Content $statusFile -Raw | ConvertFrom-Json } catch {}
+                        }
+                        Send-Json $context @{
+                            error = "Map not ready yet. Join the server once to auto-generate the map."
+                            generation = $generation
+                        } 503
+                    }
+                    continue
+                }
+
+                if ($path -match "^/public-map/tiles/(\d+)/(\d+)-(\d+)\.png$") {
+                    $tilePath = Join-Path $dataDir "map_tiles\$($Matches[1])\$($Matches[2])-$($Matches[3]).png"
+                    Send-File $context $tilePath
+                    continue
+                }
+
+                Send-Json $context @{ error = "Not found" } 404
+                continue
+            }
+
+            # All other routes require authentication, except for trusted
+            # same-host proxy integrations. Loopback source IP is not spoofable
+            # for TCP without LAN-level MITM, and the proxy is expected to
+            # authenticate users before forwarding API calls.
+            $remoteAddr = $null
+            try { $remoteAddr = $context.Request.RemoteEndPoint.Address } catch {}
+            $isLocalRequest = $false
+            if ($remoteAddr) {
+                $addrStr = $remoteAddr.ToString()
+                if ($remoteAddr.IsLoopback) { $isLocalRequest = $true }
+                elseif ($addrStr -eq "::1" -or $addrStr -eq "127.0.0.1") { $isLocalRequest = $true }
+                elseif ($addrStr.StartsWith("::ffff:127.")) { $isLocalRequest = $true }
+                elseif ($remoteAddr.IsIPv4MappedToIPv6) {
+                    try { if ($remoteAddr.MapToIPv4().IsLoopback) { $isLocalRequest = $true } } catch {}
+                }
+            }
+
+            if (-not $isLocalRequest) {
+                $currentPassword = Get-CurrentRconPassword
+                if ($null -eq $currentPassword) {
+                    if ($path.StartsWith("/api/")) {
+                        Send-Json $context @{ error = "Config temporarily unavailable, retry in a moment" } 503
+                    } else {
+                        Send-Redirect $context "/login"
+                    }
+                    continue
+                }
+                if (-not $currentPassword -or $currentPassword -eq "changeme") {
+                    # No password configured or still default — block everything
+                    if ($path.StartsWith("/api/")) {
+                        Send-Json $context @{ error = "No password configured. Set a password in windrose_plus.json to access the dashboard." } 403
+                    } else {
+                        Send-Redirect $context "/login"
+                    }
+                    continue
+                }
+                if (-not (Test-SessionToken (Get-SessionFromCookies $context.Request))) {
+                    # API calls get 401, browser requests get redirect
+                    if ($path.StartsWith("/api/")) {
+                        Send-Json $context @{ error = "Authentication required" } 401
+                    } else {
+                        Send-Redirect $context "/login"
+                    }
+                    continue
+                }
+            }
+
+            switch ($path) {
+                "/api/status" {
+                    $statusFile = Join-Path $dataDir "server_status.json"
+                    if (Test-Path -LiteralPath $statusFile) {
+                        $data = Get-Content $statusFile -Raw | ConvertFrom-Json
+                        Send-Json $context $data
+                    } else {
+                        Send-Json $context @{ error = "No status data" } 503
+                    }
+                }
+                "/api/livemap" {
+                    $mapFile = Join-Path $dataDir "livemap_data.json"
+                    if (Test-Path -LiteralPath $mapFile) {
+                        $data = Get-Content $mapFile -Raw | ConvertFrom-Json
+                        Send-Json $context $data
+                    } else {
+                        Send-Json $context @{ error = "No livemap data" } 503
+                    }
+                }
+                "/api/pois" {
+                    Send-PoiScanData $context
+                }
+                "/api/runtime-overlay" {
+                    $overlay = Get-RuntimeOverlayData
+                    if ($overlay.Ok) {
+                        Send-Json $context $overlay.Data
+                    } else {
+                        Send-Json $context @{ error = $overlay.Error } $overlay.StatusCode
+                    }
+                }
+                "/api/layout" {
+                    $r = Get-CachedLayoutScan
+                    if ($r.ok) {
+                        Send-Json $context @{
+                            ok       = $true
+                            cached   = $r.cached
+                            cachedAt = $r.cachedAt
+                            scan     = (Get-PublicScanView $r.scan)
+                        }
+                    } else {
+                        Send-Json $context @{ ok = $false; error = $r.error } 503
+                    }
+                }
+                "/api/layout/runtime" {
+                    $scanResult = Get-CachedLayoutScan
+                    if (-not $scanResult.ok) {
+                        Send-Json $context @{ ok = $false; error = $scanResult.error } 503
+                        continue
+                    }
+                    $runtimeResult = Get-CachedLayoutRuntime $scanResult.scan
+                    if ($runtimeResult.ok) {
+                        Send-Json $context @{
+                            ok                = $true
+                            layoutFingerprint = $scanResult.scan.layoutFingerprint
+                            seed              = $scanResult.scan.seed
+                            worldPreset       = $scanResult.scan.worldPreset
+                            cached            = $runtimeResult.cached
+                            stale             = ($runtimeResult.stale -eq $true)
+                            fetchedAt         = $runtimeResult.fetchedAt
+                            fetchedFrom       = $runtimeResult.fetchedFrom
+                            runtime           = $runtimeResult.runtime
+                        }
+                    } else {
+                        Send-Json $context @{
+                            ok                = $false
+                            layoutFingerprint = $scanResult.scan.layoutFingerprint
+                            error             = $runtimeResult.error
+                        } 503
+                    }
+                }
+                "/api/config" {
+                    $liveConfig = Get-CurrentConfig
+                    if ($null -eq $liveConfig) {
+                        Send-Json $context @{ error = "Config temporarily unavailable, retry in a moment" } 503
+                        continue
+                    }
+                    if ($liveConfig.rcon -and $liveConfig.rcon.password) { $liveConfig.rcon.password = "***" }
+                    Send-Json $context $liveConfig
+                }
+                "/api/pak-status" {
+                    $multPak = Join-Path $gameDir "R5\Content\Paks\WindrosePlus_Multipliers_P.pak"
+                    $ctPak   = Join-Path $gameDir "R5\Content\Paks\WindrosePlus_CurveTables_P.pak"
+                    $wrapper = Join-Path $gameDir "StartWindrosePlusServer.bat"
+                    $jsonPath = Join-Path $gameDir "windrose_plus.json"
+                    $iniPath  = Join-Path $gameDir "windrose_plus.ini"
+                    $multiplierPakDisabled = "$env:WINDROSEPLUS_DISABLE_MULTIPLIER_PAK".Trim().ToLowerInvariant() -in @("1","true","yes","on")
+                    # CurveTable-relevant INIs only — harvest is a
+                    # multipliers-only file and must NOT make ct_config_present
+                    # true on its own (would trigger spurious "Default INI
+                    # missing" status when no CT customization is in play).
+                    $ctIniPaths = @(
+                        $iniPath,
+                        (Join-Path $gameDir "windrose_plus.weapons.ini"),
+                        (Join-Path $gameDir "windrose_plus.food.ini"),
+                        (Join-Path $gameDir "windrose_plus.gear.ini"),
+                        (Join-Path $gameDir "windrose_plus.entities.ini")
+                    )
+                    # Full INI list (CT + multipliers) used for mtime / stale
+                    # detection so harvest edits still invalidate the build.
+                    $iniPaths = $ctIniPaths + @(
+                        (Join-Path $gameDir "windrose_plus.harvest.ini")
+                    )
+                    $ctConfigPresent = $false
+                    foreach ($p in $ctIniPaths) {
+                        if (Test-Path -LiteralPath $p) {
+                            $ctConfigPresent = $true
+                            break
+                        }
+                    }
+
+                    $status = @{
+                        wrapper_present         = (Test-Path -LiteralPath $wrapper)
+                        multipliers_pak_present = (Test-Path -LiteralPath $multPak)
+                        curvetables_pak_present = (Test-Path -LiteralPath $ctPak)
+                        json_present            = (Test-Path -LiteralPath $jsonPath)
+                        ini_present             = (Test-Path -LiteralPath $iniPath)
+                        ct_config_present       = $ctConfigPresent
+                        multiplier_pak_disabled = $multiplierPakDisabled
+                        multiplier_config_present = $false
+                        stale                   = $false
+                        stale_reason            = $null
+                    }
+
+                    if ($status.wrapper_present) {
+                        $configMtime = 0
+                        $configFiles = @($jsonPath) + $iniPaths
+                        foreach ($f in $configFiles) {
+                            if (Test-Path -LiteralPath $f) {
+                                $t = (Get-Item -LiteralPath $f).LastWriteTimeUtc.Ticks
+                                if ($t -gt $configMtime) { $configMtime = $t }
+                            }
+                        }
+
+                        # Does the current config *require* a Multipliers PAK?
+                        $disabledPakMultipliers = @("points_per_level", "stack_size", "weight", "inventory_size", "crop_speed")
+                        $expectMultPak = $false
+                        if ($status.json_present) {
+                            try {
+                                $j = Get-Content -LiteralPath $jsonPath -Raw | ConvertFrom-Json
+                                if ($j.multipliers) {
+                                    foreach ($p in $j.multipliers.PSObject.Properties) {
+                                        if ($disabledPakMultipliers -contains $p.Name) { continue }
+                                        if ([double]$p.Value -ne 1.0) { $expectMultPak = $true; break }
+                                    }
+                                }
+                            } catch { }
+                        }
+                        # windrose_plus.harvest.ini alone (no non-default
+                        # multipliers in the JSON) also requires a Multipliers
+                        # PAK. Inline parse — same `Key = Number` shape that
+                        # Read-HarvestIni handles in MultiplierPakBuilder.ps1.
+                        if (-not $expectMultPak) {
+                            $harvestIniPath = Join-Path $gameDir "windrose_plus.harvest.ini"
+                            if (Test-Path -LiteralPath $harvestIniPath) {
+                                try {
+                                    foreach ($raw in Get-Content -LiteralPath $harvestIniPath) {
+                                        $line = $raw.Trim()
+                                        if (-not $line) { continue }
+                                        $first = $line[0]
+                                        if ($first -eq ';' -or $first -eq '#' -or $first -eq '[') { continue }
+                                        $eq = $line.IndexOf('=')
+                                        if ($eq -lt 1) { continue }
+                                        $val = $line.Substring($eq + 1)
+                                        $semi = $val.IndexOf(';')
+                                        if ($semi -ge 0) { $val = $val.Substring(0, $semi) }
+                                        $val = $val.Trim()
+                                        $d = 0.0
+                                        if ([double]::TryParse($val, [System.Globalization.NumberStyles]::Float, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$d)) {
+                                            if ($d -ne 1.0) { $expectMultPak = $true; break }
+                                        }
+                                    }
+                                } catch { }
+                            }
+                        }
+                        $status.multiplier_config_present = $expectMultPak
+
+                        if (-not $script:IniParserLoaded) {
+                            # Can't authoritatively answer CT question — return what we know
+                            # and surface the parser error. Early-out so the composite
+                            # stale/reason calculation below doesn't overwrite this.
+                            $status.stale = $true
+                            $status.stale_reason = "Parser unavailable: $script:IniParserLoadError"
+                        } else {
+                            # Does the current config *require* a CurveTables PAK?
+                            $expectCtPak = $false
+                            $ctStatusError = $null
+                            if ($status.ct_config_present) {
+                                $defaultIniPath = Join-Path $gameDir "windrose_plus\config\windrose_plus.default.ini"
+                                if (Test-Path -LiteralPath $defaultIniPath) {
+                                    try {
+                                        $parsed = Import-WindrosePlusConfig -ConfigPath $iniPath -DefaultPath $defaultIniPath
+                                        if ($parsed.Error) {
+                                            $ctStatusError = "INI parse failed: $($parsed.Error)"
+                                        } elseif ($parsed.CurveTables -and $parsed.CurveTables.Count -gt 0) {
+                                            $expectCtPak = $true
+                                        }
+                                    } catch {
+                                        $ctStatusError = "INI parse failed: $_"
+                                    }
+                                } else {
+                                    $ctStatusError = "Default INI missing; cannot evaluate CurveTable config"
+                                }
+                            }
+
+                            $pakMtime = [long]::MaxValue
+                            $stale = $false
+                            $reason = $null
+
+                            if ($ctStatusError) {
+                                $stale = $true
+                                $reason = $ctStatusError
+                            }
+                            if ($multiplierPakDisabled -and $status.multipliers_pak_present -and -not $stale) {
+                                $stale = $true; $reason = "Multiplier PAK generation is disabled but a generated multiplier PAK is still present"
+                            }
+                            if ($expectMultPak -and -not $stale) {
+                                if ($multiplierPakDisabled) {
+                                    # Intentional no-op: config has multipliers, but the
+                                    # emergency disable switch tells the builder not to
+                                    # produce/load a generated multiplier PAK.
+                                } elseif ($status.multipliers_pak_present) {
+                                    $t = (Get-Item $multPak).LastWriteTimeUtc.Ticks
+                                    if ($t -lt $pakMtime) { $pakMtime = $t }
+                                } else {
+                                    $stale = $true; $reason = "Multipliers PAK missing but config requires one"
+                                }
+                            }
+                            if ($expectCtPak -and -not $stale) {
+                                if ($status.curvetables_pak_present) {
+                                    $t = (Get-Item $ctPak).LastWriteTimeUtc.Ticks
+                                    if ($t -lt $pakMtime) { $pakMtime = $t }
+                                } else {
+                                    $stale = $true; $reason = "CurveTables PAK missing but config requires one"
+                                }
+                            }
+                            if (-not $stale -and (($expectMultPak -and -not $multiplierPakDisabled) -or $expectCtPak)) {
+                                if ($configMtime -gt 0 -and $configMtime -gt $pakMtime) {
+                                    $stale = $true
+                                    $reason = "Config edited after PAK build"
+                                }
+                            }
+
+                            $status.stale = $stale
+                            $status.stale_reason = $reason
+                        }
+                    }
+
+                    Send-Json $context $status
+                }
+                "/api/commands" {
+                    # Source of truth is the Lua-side registry, written to
+                    # windrose_plus_data\commands.json on Admin.init() and on
+                    # every API.registerCommand() (so mod-registered commands
+                    # surface in the dashboard autocomplete without code drift).
+                    $commandsFile = Join-Path $dataDir "commands.json"
+                    if (Test-Path -LiteralPath $commandsFile) {
+                        try {
+                            $payload = Get-Content -LiteralPath $commandsFile -Raw | ConvertFrom-Json
+                            Send-Json $context @{ commands = $payload.commands; generatedAt = $payload.generatedAt }
+                            continue
+                        } catch {
+                            # fall through to bootstrap fallback
+                        }
+                    }
+                    # Bootstrap fallback: a small built-in list used only before
+                    # the Lua side has written commands.json (first boot, or if
+                    # WindrosePlus isn't loaded). Real autocomplete arrives once
+                    # the mod boots and overwrites this.
+                    Send-Json $context @{
+                        commands = @(
+                            @{name="wp.help"; usage="wp.help [command|all]"; description="List all commands or get help for a specific command"; category="server"},
+                            @{name="wp.status"; usage="wp.status"; description="Show server status and multipliers"; category="server"},
+                            @{name="wp.version"; usage="wp.version"; description="Show version"; category="server"}
+                        )
+                        bootstrap = $true
+                    }
+                }
+                "/api/mapinfo" {
+                    $mapCoordsFile = Join-Path $dataDir "map_coords.json"
+                    if (Test-Path -LiteralPath $mapCoordsFile) {
+                        $data = Get-Content $mapCoordsFile -Raw | ConvertFrom-Json
+                        Send-Json $context $data
+                    } else {
+                        $generation = $null
+                        $statusFile = Join-Path $dataDir "map_generation_status.json"
+                        if (Test-Path -LiteralPath $statusFile) {
+                            try { $generation = Get-Content $statusFile -Raw | ConvertFrom-Json } catch {}
+                        }
+                        Send-Json $context @{
+                            error = "Map not ready yet. Join the server once to auto-generate the map."
+                            generation = $generation
+                        } 503
+                    }
+                }
+                "/api/terrain_height" {
+                    # Sample the exported heightmap at a world (X, Y) and return ground Z.
+                    # Used by the SEA CHART click-to-teleport so we don't drop the player
+                    # under a mountain or in deep water.
+                    $qs = $context.Request.QueryString
+                    $xRaw = $qs["x"]
+                    $yRaw = $qs["y"]
+                    $worldX = 0.0; $worldY = 0.0
+                    if ([string]::IsNullOrWhiteSpace($xRaw) -or [string]::IsNullOrWhiteSpace($yRaw)) {
+                        Send-Json $context @{ error = "x and y query params required" } 400
+                    } elseif (-not [double]::TryParse($xRaw, [ref]$worldX)) {
+                        Send-Json $context @{ error = "x must be numeric" } 400
+                    } elseif (-not [double]::TryParse($yRaw, [ref]$worldY)) {
+                        Send-Json $context @{ error = "y must be numeric" } 400
+                    } else {
+                        $z = Get-TerrainHeightAt -DataDir $dataDir -WorldX $worldX -WorldY $worldY
+                        if ($null -eq $z) {
+                            Send-Json $context @{ x = $worldX; y = $worldY; z = $null; reason = "no_land_data" }
+                        } else {
+                            Send-Json $context @{ x = $worldX; y = $worldY; z = [double]$z }
+                        }
+                    }
+                }
+                "/api/rcon/log" {
+                    $auditFile = Join-Path $dataDir "rcon_audit.json"
+                    if (Test-Path -LiteralPath $auditFile) {
+                        try {
+                            $raw = Get-Content $auditFile -Raw
+                            if ($raw) {
+                                $buffer = [System.Text.Encoding]::UTF8.GetBytes($raw)
+                                $context.Response.StatusCode = 200
+                                $context.Response.ContentType = "application/json"
+                                $context.Response.ContentLength64 = $buffer.Length
+                                $context.Response.OutputStream.Write($buffer, 0, $buffer.Length)
+                                $context.Response.Close()
+                            } else {
+                                Send-Json $context @{ entries = @() }
+                            }
+                        } catch {
+                            Send-Json $context @{ entries = @() }
+                        }
+                    } else {
+                        Send-Json $context @{ entries = @() }
+                    }
+                }
+                "/api/rcon" {
+                    if ($method -ne "POST") {
+                        Send-Json $context @{ error = "POST required" } 405
+                        continue
+                    }
+                    $reader = New-Object System.IO.StreamReader($context.Request.InputStream)
+                    $body = $reader.ReadToEnd() | ConvertFrom-Json
+
+                    $rconSecret = Get-CurrentRconPassword
+                    if ($null -eq $rconSecret) {
+                        Send-Json $context @{ error = "Config temporarily unavailable, retry in a moment" } 503
+                        continue
+                    }
+                    if (-not $rconSecret -or $rconSecret -eq "changeme") {
+                        Send-Json $context @{ error = "RCON not configured" } 403
+                        continue
+                    }
+
+                    # Session-authenticated users don't need password in API body
+                    # (they already proved identity at login)
+
+                    # Write command file
+                    $cmdId = "ps_" + [long][DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + "_" + (Get-Random -Maximum 999999)
+                    $spoolDir = Join-Path $dataDir "rcon"
+                    if (-not (Test-Path -LiteralPath $spoolDir)) { New-Item -ItemType Directory -Path $spoolDir -Force | Out-Null }
+                    $cmdData = @{
+                        id = $cmdId
+                        command = $body.command
+                        args = @($body.args)
+                        password = $rconSecret
+                        admin_user = "Dashboard"
+                        timestamp = [long][DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+                    }
+                    $cmdPath = Join-Path $spoolDir "cmd_$cmdId.json"
+                    Write-AtomicUtf8Json $cmdPath $cmdData
+                    # Write index file so Lua mod can find the command without dir /b
+                    [System.IO.File]::AppendAllText((Join-Path $spoolDir "pending_commands.txt"), "cmd_$cmdId.json`r`n")
+
+                    # Poll for response
+                    $resPath = Join-Path $spoolDir "res_$cmdId.json"
+                    $deadline = (Get-Date).AddSeconds(25)
+                    $result = $null
+                    while ((Get-Date) -lt $deadline) {
+                        Start-Sleep -Milliseconds 100
+                        if (Test-Path -LiteralPath $resPath) {
+                            $result = Get-Content $resPath -Raw | ConvertFrom-Json
+                            Remove-Item $resPath -ErrorAction SilentlyContinue
+                            break
+                        }
+                    }
+                    if (-not $result) {
+                        $message = Get-RconWorkerDiagnostic $spoolDir $cmdPath
+                        Send-Json $context @{ id = $cmdId; status = "error"; message = $message } 504
+                        continue
+                    }
+                    Send-Json $context $result
+                }
+                "/api/character-repair" {
+                    if ($method -ne "POST") {
+                        Send-Json $context @{ error = "POST required" } 405
+                        continue
+                    }
+
+                    $maxUploadBytes = 200MB
+                    if ($context.Request.ContentLength64 -gt $maxUploadBytes) {
+                        Send-Json $context @{ error = "Upload too large. Zip files must be 200 MB or smaller." } 413
+                        continue
+                    }
+                    $maxOutputBytes = 200MB
+
+                    $healExe = Join-Path $PSScriptRoot "..\tools\windrose-heal\windrose-heal.exe"
+                    if (-not (Test-Path -LiteralPath $healExe)) {
+                        Send-Json $context @{ error = "Character repair tool is missing. Reinstall Windrose+ from the latest release zip." } 503
+                        continue
+                    }
+
+                    $repairRoot = Join-Path $dataDir "character_repair"
+                    if (-not (Test-Path -LiteralPath $repairRoot)) {
+                        New-Item -ItemType Directory -Path $repairRoot -Force | Out-Null
+                    }
+
+                    $runId = "repair_" + [long][DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + "_" + (Get-Random -Maximum 999999)
+                    $uploadPath = Join-Path $repairRoot "$runId-upload.zip"
+                    $outputPath = Join-Path $repairRoot "$runId-repaired.zip"
+                    $auditLog = Join-Path $dataDir "character_repair_audit.log"
+
+                    try {
+                        $uploadedBytes = Read-RequestBodyToFile $context $uploadPath $maxUploadBytes
+                        if ($uploadedBytes -lt 4) {
+                            throw "Uploaded file is empty or invalid."
+                        }
+
+                        $repairResult = Invoke-RepairTool $healExe $auditLog $uploadPath $outputPath 45
+                        $toolOutput = $repairResult.Output
+                        $exitCode = $repairResult.ExitCode
+                        if ($exitCode -ne 0 -or -not (Test-Path -LiteralPath $outputPath)) {
+                            Send-Json $context @{
+                                error = "No safe automatic repair was made."
+                                detail = Format-RepairToolOutput $toolOutput $repairRoot
+                            } 422
+                            continue
+                        }
+
+                        $outputInfo = Get-Item -LiteralPath $outputPath
+                        if ($outputInfo.Length -gt $maxOutputBytes) {
+                            Send-Json $context @{
+                                error = "Repair failed."
+                                detail = "The repaired zip is larger than the 200 MB limit."
+                            } 413
+                            continue
+                        }
+
+                        Send-DownloadFile $context $outputPath "windrose-save-repaired.zip" "application/zip"
+                    } catch {
+                        $statusCode = 422
+                        if ($_.Exception.Message -match "Upload exceeds") { $statusCode = 413 }
+                        Send-Json $context @{
+                            error = "Repair failed."
+                            detail = Format-RepairToolOutput $_.Exception.Message $repairRoot
+                        } $statusCode
+                    } finally {
+                        Remove-Item -LiteralPath $uploadPath -Force -ErrorAction SilentlyContinue
+                        Remove-Item -LiteralPath $outputPath -Force -ErrorAction SilentlyContinue
+                    }
+                }
+                default {
+                    # Static file serving
+                    $filePath = $path
+                    if ($filePath -eq "" -or $filePath -eq "/") { $filePath = "/index.html" }
+                    if ($filePath -eq "/livemap") { $filePath = "/livemap/index.html" }
+                    if ($filePath -eq "/repair") { $filePath = "/repair/index.html" }
+
+                    # Serve map tiles from data directory
+                    if ($filePath -match "^/livemap/tiles/(\d+)/(\d+)-(\d+)\.png$") {
+                        $tilePath = Join-Path $dataDir "map_tiles\$($Matches[1])\$($Matches[2])-$($Matches[3]).png"
+                        Send-File $context $tilePath
+                        continue
+                    }
+
+                    $safePath = $filePath.TrimStart("/").Replace("/", "\")
+                    if ([System.IO.Path]::IsPathRooted($safePath)) {
+                        $context.Response.StatusCode = 403
+                        $context.Response.Close()
+                        continue
+                    }
+                    $webRoot   = [System.IO.Path]::GetFullPath($webDir)
+                    $candidate = [System.IO.Path]::GetFullPath((Join-Path $webDir $safePath))
+                    $sep       = [System.IO.Path]::DirectorySeparatorChar
+                    if (-not $candidate.StartsWith($webRoot + $sep, [System.StringComparison]::OrdinalIgnoreCase)) {
+                        $context.Response.StatusCode = 403
+                        $context.Response.Close()
+                        continue
+                    }
+
+                    Send-File $context $candidate
+                }
+            }
+        } catch {
+            try {
+                $context.Response.StatusCode = 500
+                $context.Response.Close()
+            } catch {}
+            Write-Host "Error: $_"
+        }
+    }
+} finally {
+    $listener.Stop()
+}

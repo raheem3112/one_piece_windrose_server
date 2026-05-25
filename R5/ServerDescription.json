@@ -1,0 +1,21 @@
+{
+	"Version": 1,
+	"DeploymentId": "0.10.0.5.120-073042fb",
+	"ServerDescription_Persistent":
+	{
+		"PersistentServerId": "3BE3F0C54DD40FB0FEB83BB15BECFC0D",
+		"InviteCode": "b228ab68",
+		"IsPasswordProtected": false,
+		"Password": "",
+		"ServerName": "One Piece OG",
+		"WorldIslandId": "5B53848F867C49291EB92B639F404BAB",
+		"MaxPlayerCount": 8,
+		"UserSelectedRegion": "",
+		"P2pProxyAddress": "127.0.0.1",
+		"UseDirectConnection": false,
+		"DirectConnectionServerAddress": "",
+		"DirectConnectionServerPort": -1,
+		"DirectConnectionProxyAddress": "0.0.0.0",
+		"AutoLoadLatestBackupIfHasBroken": true
+	}
+}

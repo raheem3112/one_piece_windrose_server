@@ -1,0 +1,7 @@
+{
+    "name": "Example Welcome",
+    "version": "1.0.0",
+    "author": "WindrosePlus",
+    "description": "Logs player join/leave events to the server console",
+    "main": "init.lua"
+}

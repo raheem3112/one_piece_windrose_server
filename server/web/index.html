@@ -1,0 +1,2363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Windrose+ &mdash; Captain's Quarters</title>
+    <link rel="stylesheet" href="/vendor/fonts/fonts.css">
+    <style>
+        :root {
+            --bg: #1a1410;
+            --bg-deep: #0f0a08;
+            --bg-panel: rgba(30, 22, 16, 0.85);
+            --bg-panel-strong: rgba(38, 28, 20, 0.9);
+            --bg-console: rgba(15, 10, 8, 0.9);
+            --bg-console-soft: rgba(24, 16, 12, 0.88);
+            --text: #ede0cc;
+            --text-dim: #cdb99a;
+            --text-muted: #8f775d;
+            --accent: #d4a04a;
+            --accent-soft: rgba(212, 160, 74, 0.14);
+            --accent-strong: rgba(212, 160, 74, 0.28);
+            --border: rgba(180, 140, 80, 0.3);
+            --border-strong: rgba(212, 160, 74, 0.48);
+            --danger: #d37d66;
+            --danger-soft: rgba(211, 125, 102, 0.16);
+            --success: #d4a04a;
+            --shadow: 0 24px 80px rgba(0, 0, 0, 0.42);
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        html, body {
+            margin: 0;
+            height: 100%;
+            overflow: hidden;
+        }
+
+        body {
+            background:
+                radial-gradient(circle at top center, rgba(126, 88, 45, 0.28), transparent 34%),
+                radial-gradient(circle at 14% 18%, rgba(102, 69, 36, 0.16), transparent 24%),
+                radial-gradient(circle at 82% 20%, rgba(88, 58, 28, 0.18), transparent 26%),
+                linear-gradient(180deg, #21160f 0%, #16100c 52%, #0f0b08 100%);
+            color: var(--text);
+            font-family: 'Cormorant Garamond', Georgia, serif;
+            overflow-x: hidden;
+            position: relative;
+        }
+
+        body::before {
+            content: "";
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            opacity: 0.55;
+            background:
+                repeating-linear-gradient(0deg, rgba(255, 241, 214, 0.018) 0 2px, transparent 2px 6px),
+                repeating-linear-gradient(90deg, rgba(255, 239, 210, 0.012) 0 1px, transparent 1px 8px),
+                radial-gradient(circle at 50% 10%, rgba(212, 160, 74, 0.06), transparent 28%),
+                radial-gradient(circle at 8% 84%, rgba(112, 77, 38, 0.08), transparent 24%);
+            mix-blend-mode: screen;
+        }
+
+        body::after {
+            content: "";
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            background: radial-gradient(circle at center, transparent 36%, rgba(0, 0, 0, 0.32) 100%);
+        }
+
+        a {
+            color: inherit;
+        }
+
+        .shell {
+            width: min(1220px, calc(100% - 28px));
+            margin: 14px auto;
+            height: calc(100vh - 28px);
+            display: flex;
+            flex-direction: column;
+            border-radius: 24px;
+            overflow: hidden;
+            border: 1px solid var(--border);
+            background:
+                linear-gradient(180deg, rgba(58, 42, 31, 0.95) 0%, rgba(33, 24, 18, 0.96) 52%, rgba(22, 15, 12, 0.98) 100%);
+            box-shadow: var(--shadow);
+            position: relative;
+        }
+
+        .shell::before {
+            content: "";
+            position: absolute;
+            inset: 8px;
+            border-radius: 18px;
+            border: 1px solid rgba(255, 226, 180, 0.08);
+            pointer-events: none;
+        }
+
+        .shell::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            background:
+                linear-gradient(90deg, rgba(255, 255, 255, 0.02), transparent 12%, transparent 88%, rgba(255, 255, 255, 0.02)),
+                linear-gradient(180deg, rgba(212, 160, 74, 0.05), transparent 18%, transparent 82%, rgba(212, 160, 74, 0.04));
+        }
+
+        header {
+            position: relative;
+            z-index: 1;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 18px;
+            padding: 10px 16px;
+            background:
+                linear-gradient(180deg, rgba(65, 47, 35, 0.94), rgba(46, 34, 26, 0.94));
+            border-bottom: 1px solid var(--border);
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            min-width: 0;
+        }
+
+        .compass-icon {
+            width: 34px;
+            height: 34px;
+            display: grid;
+            place-items: center;
+            color: var(--accent);
+            flex-shrink: 0;
+            filter: drop-shadow(0 0 10px rgba(212, 160, 74, 0.18));
+        }
+
+        .compass-icon svg {
+            width: 34px;
+            height: 34px;
+            display: block;
+        }
+
+        .brand-lockup {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            min-width: 0;
+        }
+
+        .brand-divider {
+            width: 1px;
+            height: 30px;
+            background: linear-gradient(180deg, transparent, var(--border-strong), transparent);
+            flex-shrink: 0;
+        }
+
+        header h1 {
+            margin: 0;
+            font-family: 'Cinzel', Georgia, serif;
+            font-size: 1.2rem;
+            line-height: 1;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            white-space: nowrap;
+        }
+
+        header h1 .plus {
+            color: var(--accent);
+        }
+
+        .server-stack {
+            min-width: 0;
+        }
+
+        #server-name {
+            display: block;
+            font-size: 0.9rem;
+            color: var(--text-dim);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 460px;
+            line-height: 1.1;
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+        }
+
+        a.nav-link {
+            text-decoration: none;
+            font-family: 'Cinzel', Georgia, serif;
+            font-size: 0.78rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--accent);
+            padding: 6px 12px;
+            border-radius: 999px;
+            border: 1px solid var(--border);
+            background: linear-gradient(180deg, rgba(77, 56, 39, 0.45), rgba(41, 29, 21, 0.72));
+            transition: border-color 0.15s ease, transform 0.15s ease, background 0.15s ease;
+        }
+
+        a.nav-link:hover {
+            border-color: var(--border-strong);
+            background: linear-gradient(180deg, rgba(96, 69, 46, 0.54), rgba(45, 31, 23, 0.82));
+            transform: translateY(-1px);
+        }
+
+        #status-badge {
+            padding: 6px 12px;
+            border-radius: 999px;
+            border: 1px solid var(--border);
+            background: rgba(255, 255, 255, 0.03);
+            color: var(--text-dim);
+            font-family: 'Cinzel', Georgia, serif;
+            font-size: 0.82rem;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            white-space: nowrap;
+        }
+
+        #status-badge.online {
+            color: var(--accent);
+            border-color: var(--border-strong);
+            background: linear-gradient(180deg, rgba(92, 68, 42, 0.36), rgba(40, 29, 20, 0.8));
+            box-shadow: inset 0 0 0 1px rgba(212, 160, 74, 0.08);
+        }
+
+        #status-badge.offline {
+            color: var(--danger);
+            border-color: rgba(211, 125, 102, 0.4);
+            background: rgba(211, 125, 102, 0.08);
+        }
+
+        .container {
+            position: relative;
+            z-index: 1;
+            padding: 10px 16px 10px;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+
+        .pak-banner {
+            background: linear-gradient(90deg, rgba(212, 160, 74, 0.18), rgba(212, 160, 74, 0.08));
+            border: 1px solid rgba(212, 160, 74, 0.45);
+            color: #e8d8b0;
+            padding: 10px 14px;
+            border-radius: 4px;
+            font-size: 0.9rem;
+            margin-bottom: 10px;
+        }
+        .pak-banner code {
+            background: rgba(0, 0, 0, 0.35);
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: ui-monospace, Menlo, Consolas, monospace;
+        }
+
+        .hero-grid {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-bottom: 10px;
+            flex-shrink: 0;
+        }
+
+        .card {
+            position: relative;
+            border-radius: 10px;
+            border: 1px solid var(--border);
+            background: var(--bg-panel);
+            overflow: hidden;
+        }
+
+        .info-bar {
+            display: flex;
+            align-items: center;
+            gap: 18px;
+            padding: 10px 16px;
+            flex-wrap: wrap;
+        }
+
+        .info-bar .info-item {
+            display: flex;
+            align-items: baseline;
+            gap: 6px;
+            white-space: nowrap;
+        }
+
+        .info-bar .info-label {
+            font-family: 'Cinzel', Georgia, serif;
+            font-size: 0.7rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--text-muted);
+        }
+
+        .info-bar .info-val {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.85rem;
+            color: var(--text);
+        }
+
+        .info-bar .info-val.accent {
+            color: var(--accent);
+            font-size: 1.1rem;
+            font-family: 'Cinzel', Georgia, serif;
+            font-weight: 600;
+        }
+
+        .info-sep {
+            width: 1px;
+            height: 16px;
+            background: var(--border);
+            flex-shrink: 0;
+        }
+
+        .player-card {
+            padding: 12px 16px;
+        }
+
+        .card h2 {
+            margin: 0;
+            font-family: 'Cinzel', Georgia, serif;
+            font-size: 1.04rem;
+            line-height: 1.1;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: var(--text);
+        }
+
+        .player-list {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .player-row {
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr) auto auto;
+            align-items: center;
+            gap: 10px;
+            padding: 6px 8px;
+            border-radius: 8px;
+            border: 1px solid rgba(212, 160, 74, 0.08);
+            background: rgba(255, 248, 230, 0.02);
+            transition: border-color 0.15s ease, background 0.15s ease;
+        }
+
+        .player-row.tp-armed {
+            border-color: rgba(212, 160, 74, 0.5);
+            background: rgba(212, 160, 74, 0.07);
+        }
+
+        .player-tp-btn {
+            background: transparent;
+            border: 1px solid rgba(212, 160, 74, 0.25);
+            color: var(--text-muted);
+            font-family: 'Cinzel', serif;
+            font-size: 0.66rem;
+            font-weight: 700;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            padding: 3px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+
+        .player-tp-btn:hover {
+            border-color: var(--accent);
+            color: var(--accent);
+            background: rgba(212, 160, 74, 0.05);
+        }
+
+        .player-row.tp-armed .player-tp-btn {
+            border-color: var(--accent);
+            color: var(--accent);
+            background: rgba(212, 160, 74, 0.12);
+        }
+
+        #seachart-map.tp-armed,
+        #seachart-map.tp-armed .leaflet-container,
+        #seachart-map.tp-armed .leaflet-grab,
+        #seachart-map.tp-armed .leaflet-interactive {
+            cursor: crosshair !important;
+        }
+
+        .tp-hint-banner {
+            position: absolute;
+            top: 14px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(20, 16, 10, 0.92);
+            border: 1px solid var(--accent);
+            color: var(--accent);
+            padding: 7px 16px;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            font-family: 'Cormorant Garamond', serif;
+            letter-spacing: 0.03em;
+            z-index: 1000;
+            pointer-events: none;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
+        }
+
+        .tp-hint-banner .hint-key {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            margin-left: 8px;
+        }
+
+        .player-dot {
+            width: 9px;
+            height: 9px;
+            border-radius: 50%;
+            background: var(--accent);
+            box-shadow: 0 0 10px rgba(212, 160, 74, 0.26);
+        }
+
+        .player-dot.dead {
+            background: var(--danger);
+            box-shadow: 0 0 10px rgba(211, 125, 102, 0.28);
+        }
+
+        .player-name {
+            min-width: 0;
+            font-size: 1.05rem;
+            color: var(--text);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .player-pos {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            white-space: nowrap;
+            transition: color 0.15s ease;
+        }
+
+        .player-pos.tp-preview {
+            color: var(--accent);
+            font-style: italic;
+        }
+
+        .tp-hint-coords {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.78rem;
+            margin: 0 8px;
+            color: var(--text);
+        }
+
+        .empty-state {
+            padding: 10px 2px;
+            color: var(--text-muted);
+            font-size: 1rem;
+        }
+
+        .empty-state-slim {
+            padding: 6px 0;
+            color: var(--text-muted);
+            font-size: 0.9rem;
+        }
+
+        .terminal-card {
+            padding: 0;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+
+        .terminal-rail {
+            display: none;
+        }
+
+        .terminal-ornament {
+            display: none;
+        }
+
+        .terminal-shell {
+            background: var(--bg-console);
+            overflow: hidden;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+
+        .terminal-titlebar {
+            position: relative;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            padding: 8px 12px;
+            border-bottom: 1px solid rgba(212, 160, 74, 0.12);
+        }
+
+        .terminal-titlecopy {
+            min-width: 0;
+        }
+
+        .terminal-titlecopy h2 {
+            margin: 0;
+            font-size: 0.85rem;
+        }
+
+        .terminal-subtitle {
+            margin: 0;
+            color: var(--text-muted);
+            font-size: 0.95rem;
+        }
+
+        .terminal-controls {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+        }
+
+        #rcon-input:focus {
+            border-color: var(--border-strong);
+            box-shadow: 0 0 0 3px rgba(212, 160, 74, 0.08);
+        }
+
+        .terminal-output-wrap {
+            position: relative;
+            padding: 8px 12px 0;
+            flex: 1;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+        }
+
+        #rcon-output {
+            min-height: 0;
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px 12px;
+            border-radius: 8px 8px 0 0;
+            background: rgba(15, 10, 8, 0.6);
+            border: 1px solid rgba(212, 160, 74, 0.12);
+            border-bottom: none;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.88rem;
+            line-height: 1.5;
+            white-space: pre-wrap;
+        }
+
+        .rcon-line {
+            margin: 0 0 4px;
+            word-break: break-word;
+        }
+
+        .rcon-cmd {
+            color: var(--accent);
+        }
+
+        .rcon-ok {
+            color: var(--text);
+        }
+
+        .rcon-err {
+            color: var(--danger);
+        }
+
+        .rcon-info {
+            color: var(--text-muted);
+            font-style: italic;
+        }
+
+        .rcon-audit {
+            color: var(--text-dim);
+            opacity: 0.9;
+        }
+
+        .rcon-audit .audit-ts {
+            color: var(--text-muted);
+        }
+
+        .rcon-audit .audit-ip {
+            color: #b69a74;
+        }
+
+        .rcon-audit .audit-cmd {
+            color: var(--accent);
+        }
+
+        .rcon-audit .audit-ok {
+            color: var(--accent);
+        }
+
+        .rcon-audit .audit-err {
+            color: var(--danger);
+        }
+
+        .rcon-help-head {
+            color: var(--accent);
+            font-weight: 600;
+            letter-spacing: 0.04em;
+        }
+
+        .rcon-help-cmd {
+            color: var(--text);
+        }
+
+        .rcon-help-desc {
+            color: var(--text-dim);
+        }
+
+        .rcon-separator {
+            color: rgba(212, 160, 74, 0.35);
+        }
+
+        .help-row {
+            display: flex;
+            gap: 16px;
+            align-items: flex-start;
+        }
+
+        .help-row .rcon-help-cmd {
+            min-width: 240px;
+            flex-shrink: 0;
+        }
+
+        .terminal-inputbar {
+            position: relative;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px 10px;
+            background: rgba(20, 14, 11, 0.8);
+            border-top: 1px solid rgba(212, 160, 74, 0.1);
+        }
+
+        .terminal-prompt {
+            color: var(--accent);
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 1.2rem;
+            line-height: 1;
+            user-select: none;
+            flex-shrink: 0;
+        }
+
+        .terminal-input-wrap {
+            position: relative;
+            flex: 1;
+        }
+
+        #rcon-input {
+            width: 100%;
+            padding: 8px 10px;
+            border-radius: 6px;
+            border: 1px solid rgba(212, 160, 74, 0.16);
+            background: rgba(18, 12, 9, 0.74);
+            color: var(--text);
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.94rem;
+            outline: none;
+        }
+
+        #rcon-input::placeholder {
+            color: #7d6650;
+        }
+
+        .autocomplete {
+            position: absolute;
+            left: 0;
+            right: 0;
+            bottom: calc(100% + 8px);
+            display: none;
+            max-height: 220px;
+            overflow-y: auto;
+            border-radius: 12px;
+            border: 1px solid rgba(212, 160, 74, 0.22);
+            background:
+                linear-gradient(180deg, rgba(52, 37, 27, 0.96), rgba(23, 16, 13, 0.98));
+            box-shadow: 0 16px 30px rgba(0, 0, 0, 0.26);
+            z-index: 15;
+        }
+
+        .autocomplete.visible {
+            display: block;
+        }
+
+        .ac-item {
+            display: flex;
+            justify-content: space-between;
+            gap: 16px;
+            padding: 10px 12px;
+            cursor: pointer;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.84rem;
+            border-bottom: 1px solid rgba(212, 160, 74, 0.08);
+        }
+
+        .ac-item:last-child {
+            border-bottom: none;
+        }
+
+        .ac-item:hover,
+        .ac-item.selected {
+            background: rgba(212, 160, 74, 0.08);
+        }
+
+        .ac-name {
+            color: var(--accent);
+        }
+
+        .ac-desc {
+            color: var(--text-dim);
+            font-size: 0.72rem;
+            text-align: right;
+        }
+
+
+        .cmd-category {
+            margin-bottom: 10px;
+        }
+
+        .cmd-category-title {
+            font-family: 'Cinzel', Georgia, serif;
+            color: var(--accent);
+        }
+
+        .cmd-entry {
+            display: flex;
+            gap: 8px;
+        }
+
+        .cmd-usage {
+            font-family: 'IBM Plex Mono', monospace;
+        }
+
+        .cmd-desc {
+            color: var(--text-dim);
+        }
+
+        .log-entry {
+            display: flex;
+            gap: 8px;
+            align-items: baseline;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.78rem;
+        }
+
+        .log-time {
+            color: var(--text-muted);
+        }
+
+        .log-ip {
+            color: #b69a74;
+        }
+
+        .log-cmd {
+            color: var(--accent);
+        }
+
+        .log-status.ok {
+            color: var(--accent);
+        }
+
+        .log-status.err {
+            color: var(--danger);
+        }
+
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: rgba(212, 160, 74, 0.28);
+            border-radius: 999px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(212, 160, 74, 0.4);
+        }
+
+        @media (max-width: 1080px) {
+            #server-name {
+                max-width: 320px;
+            }
+        }
+
+        @media (max-width: 760px) {
+            .shell {
+                width: min(100% - 16px, 1220px);
+                margin-top: 14px;
+                border-radius: 18px;
+            }
+
+            header {
+                padding: 16px 18px;
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .header-right {
+                justify-content: space-between;
+            }
+
+            .brand-lockup {
+                gap: 12px;
+            }
+
+            .brand-divider {
+                display: none;
+            }
+
+            header h1 {
+                font-size: 1rem;
+            }
+
+            #server-name {
+                max-width: 100%;
+                font-size: 0.82rem;
+            }
+
+            .container {
+                padding: 10px;
+            }
+
+            .info-bar {
+                flex-wrap: wrap;
+                gap: 10px;
+                padding: 8px 12px;
+            }
+
+            .info-sep { display: none; }
+
+            .terminal-titlebar {
+                padding: 8px 10px;
+                flex-direction: column;
+                align-items: stretch;
+                gap: 8px;
+            }
+
+            .terminal-controls {
+                justify-content: stretch;
+            }
+
+            #rcon-output {
+                min-height: 250px;
+                max-height: calc(100vh - 300px);
+                font-size: 0.82rem;
+            }
+
+            .help-row {
+                flex-direction: column;
+                gap: 2px;
+            }
+
+            .help-row .rcon-help-cmd {
+                min-width: 0;
+            }
+
+            .player-row {
+                grid-template-columns: auto minmax(0, 1fr);
+            }
+
+            .player-pos {
+                grid-column: 2;
+            }
+        }
+        .dashboard-tabs {
+            display: flex;
+            gap: 2px;
+        }
+        .dashboard-tab {
+            padding: 5px 14px;
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text-muted);
+            font-family: 'Cinzel', serif;
+            font-size: 0.72rem;
+            font-weight: 700;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: all 0.2s;
+        }
+        .dashboard-tab:hover {
+            color: var(--accent);
+            border-color: var(--accent);
+        }
+        .dashboard-tab.active {
+            background: var(--accent-soft);
+            color: var(--accent);
+            border-color: var(--border-strong);
+        }
+        .dashboard-link {
+            color: var(--text-dim);
+            background: transparent;
+            border: 1px solid var(--border);
+            font-family: 'Cinzel', serif;
+            font-size: 0.72rem;
+            font-weight: 700;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: all 0.2s;
+            text-decoration: none;
+            padding: 6px 10px;
+        }
+        .dashboard-link:hover {
+            color: var(--accent);
+            border-color: var(--accent);
+        }
+        .tab-content { display: none; flex: 1; min-height: 0; flex-direction: column; }
+        .tab-content.active { display: flex; }
+        #seachart-pane { position: relative; }
+        #seachart-map { width: 100%; height: 100%; min-height: 300px; background: #141820; border: 0; border-radius: 8px; }
+
+        .player-card-footer {
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid rgba(212, 160, 74, 0.1);
+            display: flex;
+            justify-content: flex-end;
+        }
+        .repair-link {
+            background: transparent;
+            border: 0;
+            color: var(--text-muted);
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.74rem;
+            cursor: pointer;
+            padding: 2px 4px;
+            letter-spacing: 0.04em;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            transition: color 0.18s;
+        }
+        .repair-link:hover { color: var(--accent); }
+        .repair-link svg { opacity: 0.7; }
+        .repair-link:hover svg { opacity: 1; }
+
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.66);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            backdrop-filter: blur(3px);
+            -webkit-backdrop-filter: blur(3px);
+        }
+        .modal-overlay.active { display: flex; }
+        .modal-shell {
+            width: min(620px, calc(100% - 32px));
+            max-height: 88vh;
+            overflow-y: auto;
+            background: linear-gradient(180deg, rgba(50, 36, 25, 0.98), rgba(28, 19, 13, 0.98));
+            border: 1px solid rgba(212, 160, 74, 0.45);
+            border-radius: 14px;
+            padding: 20px 22px;
+            box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6);
+            position: relative;
+            color: var(--text);
+            font-family: 'Cormorant Garamond', Georgia, serif;
+        }
+        .modal-titlebar {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            margin: -2px -2px 14px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--border);
+            gap: 14px;
+        }
+        .modal-title {
+            margin: 0;
+            font-family: 'Cinzel', Georgia, serif;
+            font-size: 1.05rem;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            color: var(--text);
+        }
+        .modal-title .accent { color: var(--accent); }
+        .modal-close {
+            background: transparent;
+            border: 0;
+            color: var(--text-muted);
+            font-size: 1.6rem;
+            cursor: pointer;
+            line-height: 0.8;
+            padding: 0 6px;
+            font-family: 'Cormorant Garamond', serif;
+        }
+        .modal-close:hover { color: var(--accent); }
+        .modal-body {
+            font-size: 1rem;
+            line-height: 1.45;
+            color: var(--text-dim);
+        }
+        .modal-body p { margin: 0 0 12px; }
+        .modal-body ol {
+            margin: 0 0 14px;
+            padding-left: 22px;
+        }
+        .modal-body li { margin: 4px 0; }
+        .modal-body code {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.84em;
+            color: var(--accent);
+            background: rgba(0, 0, 0, 0.3);
+            padding: 1px 5px;
+            border-radius: 4px;
+            border: 1px solid rgba(212, 160, 74, 0.18);
+        }
+        .modal-upload {
+            border: 1px dashed var(--border);
+            border-radius: 10px;
+            padding: 14px;
+            margin: 12px 0 4px;
+            background: rgba(0, 0, 0, 0.22);
+        }
+        .modal-upload input[type="file"] {
+            width: 100%;
+            color: var(--text-dim);
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.82rem;
+        }
+        .modal-actions {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            margin-top: 12px;
+        }
+        .modal-btn {
+            background: linear-gradient(180deg, rgba(212, 160, 74, 0.28), rgba(128, 83, 35, 0.32));
+            color: var(--text);
+            border: 1px solid var(--border);
+            padding: 9px 16px;
+            border-radius: 8px;
+            font-family: 'Cinzel', Georgia, serif;
+            font-weight: 700;
+            font-size: 0.74rem;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            cursor: pointer;
+            transition: all 0.18s;
+        }
+        .modal-btn:hover:not(:disabled) {
+            background: linear-gradient(180deg, rgba(212, 160, 74, 0.42), rgba(128, 83, 35, 0.46));
+            border-color: var(--accent);
+        }
+        .modal-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .modal-status {
+            margin-top: 12px;
+            padding: 10px 12px;
+            border-radius: 8px;
+            font-size: 0.92rem;
+            line-height: 1.4;
+            display: none;
+            white-space: pre-wrap;
+        }
+        .modal-status.busy {
+            display: block;
+            background: rgba(212, 160, 74, 0.12);
+            border: 1px solid var(--border);
+            color: var(--text);
+        }
+        .modal-status.ok {
+            display: block;
+            background: rgba(184, 212, 122, 0.12);
+            border: 1px solid rgba(184, 212, 122, 0.34);
+            color: #c8de8a;
+        }
+        .modal-status.err {
+            display: block;
+            background: rgba(211, 125, 102, 0.14);
+            border: 1px solid rgba(211, 125, 102, 0.36);
+            color: #f0b8a8;
+        }
+        .modal-warning {
+            margin-top: 10px;
+            color: var(--text-muted);
+            font-size: 0.86rem;
+            line-height: 1.4;
+            font-style: italic;
+        }
+    </style>
+    <link rel="stylesheet" href="/vendor/leaflet/leaflet.css" />
+    <script src="/vendor/leaflet/leaflet.js"></script>
+</head>
+<body>
+    <div class="shell">
+        <header>
+            <div class="header-left">
+                <div class="brand-lockup">
+                    <div class="compass-icon" aria-hidden="true">
+                        <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <circle cx="32" cy="32" r="29" stroke="currentColor" stroke-opacity="0.35" stroke-width="2"/>
+                            <circle cx="32" cy="32" r="3.4" fill="currentColor"/>
+                            <path d="M32 5L37 25L32 32L27 25L32 5Z" fill="currentColor"/>
+                            <path d="M32 59L27 39L32 32L37 39L32 59Z" fill="currentColor" fill-opacity="0.9"/>
+                            <path d="M5 32L25 27L32 32L25 37L5 32Z" fill="currentColor" fill-opacity="0.85"/>
+                            <path d="M59 32L39 37L32 32L39 27L59 32Z" fill="currentColor"/>
+                            <path d="M13 13L28 23L32 32L23 28L13 13Z" fill="currentColor" fill-opacity="0.55"/>
+                            <path d="M51 13L41 28L32 32L36 23L51 13Z" fill="currentColor" fill-opacity="0.72"/>
+                            <path d="M13 51L23 36L32 32L28 41L13 51Z" fill="currentColor" fill-opacity="0.72"/>
+                            <path d="M51 51L36 41L32 32L41 36L51 51Z" fill="currentColor" fill-opacity="0.55"/>
+                            <path d="M32 11V16" stroke="#1a1410" stroke-width="2.3" stroke-linecap="round"/>
+                            <path d="M53 32H48" stroke="#1a1410" stroke-width="2.3" stroke-linecap="round"/>
+                            <path d="M32 53V48" stroke="#1a1410" stroke-width="2.3" stroke-linecap="round"/>
+                            <path d="M11 32H16" stroke="#1a1410" stroke-width="2.3" stroke-linecap="round"/>
+                        </svg>
+                    </div>
+                    <div class="server-stack">
+                        <h1>WINDROSE <span class="plus">PLUS</span></h1>
+                    </div>
+                    <div class="brand-divider" aria-hidden="true"></div>
+                    <div class="server-stack">
+                        <span id="server-name">Awaiting server ledger...</span>
+                    </div>
+                </div>
+            </div>
+            <div class="header-right">
+                <div class="dashboard-tabs">
+                    <button class="dashboard-tab active" data-tab="console">CONSOLE</button>
+                    <button class="dashboard-tab" data-tab="seachart">SEA CHART</button>
+                </div>
+                <span id="status-badge">CONNECTING</span>
+            </div>
+        </header>
+
+        <main class="container">
+            <div id="pak-banner" class="pak-banner" style="display:none" role="alert">
+                <span id="pak-banner-msg">Config changed since last build. Restart the server via <code>StartWindrosePlusServer.bat</code> to apply.</span>
+            </div>
+            <section class="hero-grid">
+                <div class="card info-bar">
+                    <div class="info-item">
+                        <span class="info-label">Players</span>
+                        <span class="info-val accent" id="player-count">-</span>
+                        <span class="info-val" id="player-max" style="color:var(--text-muted);font-size:0.8rem;"></span>
+                    </div>
+                    <div class="info-sep"></div>
+                    <div class="info-item">
+                        <span class="info-label">Version</span>
+                        <span class="info-val" id="server-version">-</span>
+                    </div>
+                    <div class="info-sep"></div>
+                    <div class="info-item">
+                        <span class="info-label">WP</span>
+                        <span class="info-val" id="wp-version">-</span>
+                    </div>
+                </div>
+                <div class="card player-card">
+                    <div class="player-list" id="player-list">
+                        <div class="empty-state-slim">No crew aboard</div>
+                    </div>
+                    <div class="player-card-footer">
+                        <button type="button" class="repair-link" id="open-repair-modal" title="Repair a stuck character save (RewardLevel &lt; CurrentLevel drift)">
+                            <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11.5 4.5L13 6L9 10L7.5 8.5L11.5 4.5Z"/><path d="M7.5 8.5L3.5 12.5L4.5 13.5L8.5 9.5"/><path d="M11.5 4.5C12.5 3.5 13.5 4 14 4.5C14.5 5 15 6 14 7"/></svg>
+                            Repair character save
+                        </button>
+                    </div>
+                </div>
+                <!-- Hidden elements for test compat -->
+                <div style="display:none;">
+                    <span id="server-password">-</span>
+                    <span id="server-max">-</span>
+                    <span id="game-port">-</span>
+                    <span id="invite-code">-</span>
+                    <span id="mult-loot">-</span>
+                    <span id="mult-xp">-</span>
+                    <span id="mult-stack">-</span>
+                    <span id="mult-craft">-</span>
+                    <span id="mult-crop">-</span>
+                    <span id="mult-cooking">-</span>
+                    <span id="mult-weight">-</span>
+                    <div id="last-updated">-</div>
+                </div>
+            </section>
+
+            <div class="tab-content active" id="console-pane">
+                <section class="card terminal-card">
+                    <div class="terminal-rail">
+                        <div class="terminal-ornament" aria-hidden="true"></div>
+                    </div>
+
+                    <div class="terminal-shell">
+                        <div class="terminal-titlebar">
+                            <div class="terminal-titlecopy">
+                                <h2>Console</h2>
+                            </div>
+
+                            <div class="terminal-controls">
+                            </div>
+                        </div>
+
+                        <div class="terminal-output-wrap">
+                            <div id="rcon-output">
+                                <div class="rcon-line rcon-info">Type <span class="rcon-help-cmd">wp.help</span> or <span class="rcon-help-cmd">/help</span> to unfurl the command ledger.</div>
+                            </div>
+                        </div>
+
+                        <div class="terminal-inputbar">
+                            <span class="terminal-prompt">&gt;</span>
+                            <div class="terminal-input-wrap">
+                                <div class="autocomplete" id="autocomplete"></div>
+                                <input type="text" id="rcon-input" placeholder="Enter command..." autocomplete="off" spellcheck="false">
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+            <div class="tab-content" id="seachart-pane">
+                <iframe id="seachart-map" title="WindrosePlus Sea Chart" loading="lazy"></iframe>
+                <div class="tp-hint-banner" id="tp-hint-banner" style="display:none;"></div>
+            </div>
+
+            <!-- Hidden elements preserved for test compatibility -->
+            <div style="display:none;">
+                <button id="cmd-ref-toggle"><span id="cmd-ref-arrow">&#9654;</span></button>
+                <div id="cmd-ref-body"></div>
+                <div id="audit-log"></div>
+                <span id="log-count"></span>
+            </div>
+        </main>
+
+    </div>
+
+    <script>
+        const rconInput = document.getElementById('rcon-input');
+        const rconOutput = document.getElementById('rcon-output');
+        const autocompleteEl = document.getElementById('autocomplete');
+
+        let commandHistory = [];
+        let historyIndex = -1;
+        let commands = [];
+        let acIndex = -1;
+        let acVisible = false;
+        let lastAuditTimestamp = 0;
+        let auditInited = false;
+        const seenAuditKeys = new Set();
+
+        async function loadCommands() {
+            try {
+                const res = await fetch('/api/commands');
+                const data = await res.json();
+                commands = data.commands || [];
+                buildCommandRef(commands);
+            } catch (e) {}
+        }
+
+        async function fetchStatus() {
+            try {
+                const res = await fetch('/api/status');
+                const data = await res.json();
+                if (data.error) throw new Error(data.error);
+
+                const badge = document.getElementById('status-badge');
+                badge.className = 'online';
+                badge.textContent = 'SAILING';
+
+                const s = data.server || {};
+                document.getElementById('server-name').textContent = s.name || '';
+                document.getElementById('player-count').textContent = s.player_count ?? 0;
+                document.getElementById('player-max').textContent = s.max_players ? '/ ' + s.max_players : '';
+                document.getElementById('server-version').textContent = s.version || '-';
+                document.getElementById('wp-version').textContent = 'v' + (s.windrose_plus || '-');
+                document.getElementById('server-password').textContent = s.password_protected ? 'Yes' : 'No';
+                document.getElementById('server-max').textContent = s.max_players || '-';
+                document.getElementById('game-port').textContent = s.game_port || '-';
+                document.getElementById('invite-code').textContent = s.invite_code || '-';
+
+                if (data.timestamp) {
+                    const ago = Math.round(Date.now() / 1000 - data.timestamp);
+                    document.getElementById('last-updated').textContent =
+                        ago < 5 ? 'Updated just now' : `Updated ${ago}s ago`;
+                }
+
+                const m = data.multipliers || {};
+                document.getElementById('mult-loot').textContent = m.loot != null ? m.loot + 'x' : '-';
+                document.getElementById('mult-xp').textContent = m.xp != null ? m.xp + 'x' : '-';
+                document.getElementById('mult-stack').textContent = m.stack_size != null ? m.stack_size + 'x' : '-';
+                document.getElementById('mult-craft').textContent = (m.craft_efficiency ?? m.craft_cost) != null ? (m.craft_efficiency ?? m.craft_cost) + 'x' : '-';
+                document.getElementById('mult-crop').textContent = m.crop_speed != null ? m.crop_speed + 'x' : '-';
+                document.getElementById('mult-cooking').textContent = m.cooking_speed != null ? m.cooking_speed + 'x' : '-';
+                document.getElementById('mult-weight').textContent = m.weight != null ? m.weight + 'x' : '-';
+
+                const list = document.getElementById('player-list');
+                const players = data.players || [];
+                if (players.length === 0) {
+                    list.innerHTML = '<div class="empty-state-slim">No crew aboard</div>';
+                } else {
+                    list.innerHTML = '';
+                    for (const p of players) {
+                        const row = document.createElement('div');
+                        row.className = 'player-row';
+                        row.dataset.player = p.name || '';
+                        // Stash current Z on the row so the click handler has a fallback
+                        // if /api/terrain_height returns null (ocean / out-of-bounds /
+                        // pre-export). Always sending a Z avoids an arg-parser ambiguity
+                        // in wp.tp when player names are numeric or end in a numeric token.
+                        row.dataset.playerZ = p.z != null ? Math.round(p.z) : '';
+                        if (tpArmedPlayer && tpArmedPlayer === p.name) {
+                            row.classList.add('tp-armed');
+                        }
+
+                        const dot = document.createElement('div');
+                        dot.className = 'player-dot' + (p.alive === false ? ' dead' : '');
+
+                        const name = document.createElement('span');
+                        name.className = 'player-name';
+                        name.textContent = p.name || 'Unknown';
+
+                        const tpBtn = document.createElement('button');
+                        tpBtn.className = 'player-tp-btn';
+                        tpBtn.type = 'button';
+                        tpBtn.textContent = 'TELEPORT';
+                        tpBtn.title = 'Teleport ' + (p.name || 'this player') + ' — then click anywhere on the SEA CHART';
+                        tpBtn.addEventListener('click', (ev) => {
+                            ev.stopPropagation();
+                            armTeleport(p.name);
+                        });
+
+                        const pos = document.createElement('span');
+                        pos.className = 'player-pos';
+                        const actualPosText = p.x != null ? `${Math.round(p.x)}, ${Math.round(p.y)}` : '';
+                        // If this is the armed player and a preview is active, keep showing
+                        // the cursor coords; stash the actual position so disarm/mouseout
+                        // can revert without waiting for the next status refresh.
+                        if (tpArmedPlayer === p.name && tpPreviewCoords) {
+                            pos.textContent = `${tpPreviewCoords.x}, ${tpPreviewCoords.y}`;
+                            pos.classList.add('tp-preview');
+                            pos.dataset.origText = actualPosText;
+                        } else {
+                            pos.textContent = actualPosText;
+                        }
+
+                        row.append(dot, name, tpBtn, pos);
+                        list.appendChild(row);
+                    }
+                }
+            } catch (e) {
+                const badge = document.getElementById('status-badge');
+                badge.className = 'offline';
+                badge.textContent = 'ADRIFT';
+            }
+        }
+
+        async function sendRconCommand(command) {
+            appendOutput('> ' + command, 'rcon-cmd');
+
+            try {
+                const res = await fetch('/api/rcon', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ command }),
+                });
+                const data = await res.json();
+
+                if (res.status === 401 || res.status === 403) {
+                    appendOutput(data.error || 'Authentication failed', 'rcon-err');
+                } else {
+                    appendOutput(data.message || data.error || 'No response', data.status === 'ok' ? 'rcon-ok' : 'rcon-err');
+                }
+            } catch (e) {
+                appendOutput('Connection error: ' + e.message, 'rcon-err');
+            }
+        }
+
+        function appendOutput(text, cls) {
+            const line = document.createElement('div');
+            line.className = 'rcon-line ' + (cls || '');
+            line.textContent = text;
+            rconOutput.appendChild(line);
+            rconOutput.scrollTop = rconOutput.scrollHeight;
+            while (rconOutput.children.length > 300) {
+                rconOutput.removeChild(rconOutput.firstChild);
+            }
+        }
+
+        function appendOutputEl(el) {
+            rconOutput.appendChild(el);
+            rconOutput.scrollTop = rconOutput.scrollHeight;
+            while (rconOutput.children.length > 300) {
+                rconOutput.removeChild(rconOutput.firstChild);
+            }
+        }
+
+        function showAutocomplete(query) {
+            if (!query || query.length < 2) {
+                hideAutocomplete();
+                return;
+            }
+
+            const q = query.toLowerCase();
+            const matches = commands.filter((c) =>
+                (c.name || '').toLowerCase().includes(q) ||
+                (c.description || '').toLowerCase().includes(q)
+            );
+
+            if (matches.length === 0) {
+                hideAutocomplete();
+                return;
+            }
+
+            autocompleteEl.innerHTML = '';
+            matches.slice(0, 8).forEach((cmd, i) => {
+                const item = document.createElement('div');
+                item.className = 'ac-item' + (i === acIndex ? ' selected' : '');
+
+                const nameSpan = document.createElement('span');
+                nameSpan.className = 'ac-name';
+                nameSpan.textContent = cmd.name;
+
+                const descSpan = document.createElement('span');
+                descSpan.className = 'ac-desc';
+                descSpan.textContent = cmd.description;
+
+                item.append(nameSpan, descSpan);
+                item.addEventListener('mousedown', (e) => {
+                    e.preventDefault();
+                    rconInput.value = (cmd.usage || cmd.name || '').split(' ')[0] + ' ';
+                    hideAutocomplete();
+                    rconInput.focus();
+                });
+
+                autocompleteEl.appendChild(item);
+            });
+
+            autocompleteEl.classList.add('visible');
+            acVisible = true;
+        }
+
+        function hideAutocomplete() {
+            autocompleteEl.classList.remove('visible');
+            acVisible = false;
+            acIndex = -1;
+        }
+
+        rconInput.addEventListener('input', () => {
+            acIndex = -1;
+            const val = rconInput.value.trim().split(' ')[0];
+            showAutocomplete(val);
+        });
+
+        rconInput.addEventListener('keydown', (e) => {
+            if (acVisible) {
+                const items = autocompleteEl.querySelectorAll('.ac-item');
+
+                if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    acIndex = Math.max(0, acIndex - 1);
+                    items.forEach((it, i) => it.classList.toggle('selected', i === acIndex));
+                    return;
+                }
+
+                if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    acIndex = Math.min(items.length - 1, acIndex + 1);
+                    items.forEach((it, i) => it.classList.toggle('selected', i === acIndex));
+                    return;
+                }
+
+                if (e.key === 'Tab' || (e.key === 'Enter' && acIndex >= 0)) {
+                    e.preventDefault();
+                    if (acIndex >= 0 && acIndex < items.length) {
+                        const name = items[acIndex].querySelector('.ac-name').textContent;
+                        rconInput.value = name + ' ';
+                    }
+                    hideAutocomplete();
+                    return;
+                }
+
+                if (e.key === 'Escape') {
+                    hideAutocomplete();
+                    return;
+                }
+            }
+
+            if (e.key === 'Enter' && rconInput.value.trim()) {
+                const cmd = rconInput.value.trim();
+                commandHistory.unshift(cmd);
+                if (commandHistory.length > 50) {
+                    commandHistory.pop();
+                }
+                historyIndex = -1;
+                sendCommand(cmd);
+                rconInput.value = '';
+                hideAutocomplete();
+            }
+
+            if (e.key === 'ArrowUp' && !acVisible) {
+                e.preventDefault();
+                if (historyIndex < commandHistory.length - 1) {
+                    historyIndex++;
+                    rconInput.value = commandHistory[historyIndex];
+                }
+            }
+
+            if (e.key === 'ArrowDown' && !acVisible) {
+                e.preventDefault();
+                if (historyIndex > 0) {
+                    historyIndex--;
+                    rconInput.value = commandHistory[historyIndex];
+                } else {
+                    historyIndex = -1;
+                    rconInput.value = '';
+                }
+            }
+        });
+
+        rconInput.addEventListener('blur', () => setTimeout(hideAutocomplete, 150));
+
+        const catNames = {
+            info: 'Navigation & Intel',
+            multiplier: 'Ship Modifications',
+            admin: "Captain's Orders",
+            debug: "Cartographer's Tools"
+        };
+
+        function buildCommandRef(cmds) {
+            const body = document.getElementById('cmd-ref-body');
+            const categories = {};
+
+            for (const cmd of cmds) {
+                const cat = cmd.category || 'general';
+                if (!categories[cat]) {
+                    categories[cat] = [];
+                }
+                categories[cat].push(cmd);
+            }
+
+            body.innerHTML = '';
+
+            for (const [cat, list] of Object.entries(categories)) {
+                const catDiv = document.createElement('div');
+                catDiv.className = 'cmd-category';
+
+                const title = document.createElement('div');
+                title.className = 'cmd-category-title';
+                title.textContent = catNames[cat] || cat;
+                catDiv.appendChild(title);
+
+                for (const cmd of list) {
+                    const entry = document.createElement('div');
+                    entry.className = 'cmd-entry';
+
+                    const usage = document.createElement('span');
+                    usage.className = 'cmd-usage';
+                    usage.textContent = cmd.usage;
+
+                    const desc = document.createElement('span');
+                    desc.className = 'cmd-desc';
+                    desc.textContent = cmd.description;
+
+                    entry.append(usage, desc);
+                    catDiv.appendChild(entry);
+                }
+
+                body.appendChild(catDiv);
+            }
+        }
+
+        function toggleCmdRef() {
+            const body = document.getElementById('cmd-ref-body');
+            const arrow = document.getElementById('cmd-ref-arrow');
+            const visible = body.classList.toggle('visible');
+            arrow.innerHTML = visible ? '&#9660;' : '&#9654;';
+        }
+
+        function renderHelpInTerminal() {
+            if (commands.length === 0) {
+                appendOutput('No commands loaded yet. Try again in a moment.', 'rcon-info');
+                return;
+            }
+
+            appendOutput('Available commands', 'rcon-help-head');
+
+            const sep = document.createElement('div');
+            sep.className = 'rcon-line rcon-separator';
+            sep.textContent = '─'.repeat(60);
+            appendOutputEl(sep);
+
+            const categories = {};
+            for (const cmd of commands) {
+                const cat = cmd.category || 'general';
+                if (!categories[cat]) {
+                    categories[cat] = [];
+                }
+                categories[cat].push(cmd);
+            }
+
+            const order = ['info', 'multiplier', 'admin', 'debug'];
+            const orderedKeys = [...order.filter((key) => categories[key]), ...Object.keys(categories).filter((key) => !order.includes(key))];
+
+            for (const cat of orderedKeys) {
+                const head = document.createElement('div');
+                head.className = 'rcon-line rcon-help-head';
+                head.textContent = (catNames[cat] || cat).toUpperCase();
+                appendOutputEl(head);
+
+                for (const cmd of categories[cat]) {
+                    const row = document.createElement('div');
+                    row.className = 'rcon-line help-row';
+
+                    const usageEl = document.createElement('span');
+                    usageEl.className = 'rcon-help-cmd';
+                    usageEl.textContent = cmd.usage;
+
+                    const descEl = document.createElement('span');
+                    descEl.className = 'rcon-help-desc';
+                    descEl.textContent = cmd.description;
+
+                    row.append(usageEl, descEl);
+                    appendOutputEl(row);
+                }
+
+                const spacer = document.createElement('div');
+                spacer.className = 'rcon-line';
+                spacer.innerHTML = '&nbsp;';
+                appendOutputEl(spacer);
+            }
+
+            const sep2 = document.createElement('div');
+            sep2.className = 'rcon-line rcon-separator';
+            sep2.textContent = '─'.repeat(60);
+            appendOutputEl(sep2);
+        }
+
+        async function sendCommand(command) {
+            const lower = command.trim().toLowerCase();
+            if (lower === 'help' || lower === 'wp.help' || lower === '/help') {
+                appendOutput('> ' + command, 'rcon-cmd');
+                renderHelpInTerminal();
+                return;
+            }
+            return sendRconCommand(command);
+        }
+
+        function makeAuditKey(entry) {
+            return [
+                entry.timestamp || 0,
+                entry.ip || '',
+                entry.command || '',
+                entry.status || ''
+            ].join('|');
+        }
+
+        async function fetchAuditLog() {
+            try {
+                const res = await fetch('/api/rcon/log');
+                const entries = await res.json();
+
+                // Update hidden elements for test compatibility
+                const el = document.getElementById('audit-log');
+                const countEl = document.getElementById('log-count');
+
+                if (!Array.isArray(entries) || entries.length === 0) {
+                    el.innerHTML = '<div class="empty-state">No entries in the log</div>';
+                    countEl.textContent = '';
+                    if (!auditInited) auditInited = true;
+                    return;
+                }
+
+                countEl.textContent = entries.length + ' entries';
+                el.innerHTML = '';
+                for (const e of entries) {
+                    const row = document.createElement('div');
+                    row.className = 'log-entry';
+                    const time = new Date(e.timestamp * 1000);
+                    const timeStr = time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                    const dateStr = time.toLocaleDateString([], { month: 'short', day: 'numeric' });
+                    const makeSpan = (cls, text) => { const s = document.createElement('span'); s.className = cls; s.textContent = text; return s; };
+                    row.append(
+                        makeSpan('log-time', dateStr + ' ' + timeStr),
+                        makeSpan('log-ip', e.ip || ''),
+                        makeSpan('log-cmd', e.command || ''),
+                        makeSpan('log-status ' + (e.status === 'ok' ? 'ok' : 'err'), e.status || '')
+                    );
+                    el.appendChild(row);
+                }
+
+                // Stream new entries into the console output
+                const newEntries = entries
+                    .filter((entry) => {
+                        const key = makeAuditKey(entry);
+                        if (entry.timestamp < lastAuditTimestamp) return false;
+                        if (seenAuditKeys.has(key)) return false;
+                        seenAuditKeys.add(key);
+                        return true;
+                    })
+                    .sort((a, b) => a.timestamp - b.timestamp);
+
+                if (newEntries.length > 0) {
+                    const toShow = !auditInited && newEntries.length > 5 ? newEntries.slice(-5) : newEntries;
+
+                    if (!auditInited) {
+                        const sep = document.createElement('div');
+                        sep.className = 'rcon-line rcon-separator';
+                        sep.textContent = '\u2500'.repeat(40) + ' audit log ' + '\u2500'.repeat(9);
+                        appendOutputEl(sep);
+                    }
+
+                    for (const e of toShow) {
+                        const time = new Date(e.timestamp * 1000);
+                        const ts = time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+                        const row = document.createElement('div');
+                        row.className = 'rcon-line rcon-audit';
+
+                        const tsEl = document.createElement('span');
+                        tsEl.className = 'audit-ts';
+                        tsEl.textContent = '[' + ts + '] ';
+
+                        const ipEl = document.createElement('span');
+                        ipEl.className = 'audit-ip';
+                        ipEl.textContent = (e.ip || 'unknown') + ' ';
+
+                        const cmdEl = document.createElement('span');
+                        cmdEl.className = 'audit-cmd';
+                        cmdEl.textContent = (e.command || '') + ' ';
+
+                        const arrow = document.createTextNode('\u2192 ');
+
+                        const statusEl = document.createElement('span');
+                        statusEl.className = e.status === 'ok' ? 'audit-ok' : 'audit-err';
+                        statusEl.textContent = e.status || '';
+
+                        row.append(tsEl, ipEl, cmdEl, arrow, statusEl);
+                        appendOutputEl(row);
+                    }
+                }
+
+                lastAuditTimestamp = Math.max(lastAuditTimestamp, ...entries.map((e) => e.timestamp || 0));
+                auditInited = true;
+            } catch (e) {}
+        }
+
+        document.getElementById('cmd-ref-toggle').addEventListener('click', toggleCmdRef);
+
+        async function fetchPakStatus() {
+            try {
+                const res = await fetch('/api/pak-status');
+                const s = await res.json();
+                const banner = document.getElementById('pak-banner');
+                const msg = document.getElementById('pak-banner-msg');
+                if (s && s.wrapper_present && s.multiplier_pak_disabled && s.multipliers_pak_present) {
+                    msg.textContent = 'Multiplier PAK generation is disabled but a generated multiplier PAK is still present. Restart the server via StartWindrosePlusServer.bat to remove it.';
+                    banner.style.display = 'block';
+                } else if (s && s.wrapper_present && s.multiplier_pak_disabled && s.multiplier_config_present) {
+                    msg.textContent = 'Multiplier PAK generation is disabled; non-default multiplier config will not apply until WINDROSEPLUS_DISABLE_MULTIPLIER_PAK is removed and the server is restarted via StartWindrosePlusServer.bat.';
+                    banner.style.display = 'block';
+                } else if (s && s.wrapper_present && s.stale) {
+                    if (s.stale_reason) {
+                        msg.textContent = s.stale_reason + ' Restart the server via StartWindrosePlusServer.bat to apply.';
+                    }
+                    banner.style.display = 'block';
+                } else {
+                    banner.style.display = 'none';
+                }
+            } catch (e) { /* ignore */ }
+        }
+
+        setInterval(fetchStatus, 5000);
+        setInterval(fetchAuditLog, 10000);
+        setInterval(fetchPakStatus, 15000);
+        fetchStatus();
+        fetchAuditLog();
+        fetchPakStatus();
+        loadCommands();
+
+        document.getElementById('invite-code').addEventListener('click', function() {
+            const code = this.textContent;
+            if (code && code !== '-') {
+                navigator.clipboard.writeText(code).then(() => {
+                    const orig = this.textContent;
+                    this.textContent = 'Copied!';
+                    setTimeout(() => { this.textContent = orig; }, 1200);
+                });
+            }
+        });
+        // Tab switching
+        var seachartInitialized = false;
+
+        // -------- Click-to-teleport state --------
+        // The TELEPORT button on each player row "arms" a teleport for that player. While
+        // armed, the SEA CHART map shows a crosshair cursor and a hint banner. As the
+        // cursor moves over the map, tpPreviewCoords tracks the hover point and we mirror
+        // it into the player row's coords field (in italic accent) and the banner — so
+        // the admin sees exactly where the click would land. The next map click sends
+        // `wp.tp <player> <x> <y> [z]` and disarms. ESC or re-clicking the same TELEPORT
+        // button cancels and reverts the row coords to the player's actual position.
+        var tpArmedPlayer = null;
+        var tpArmedPlayerZ = null;  // captured at arm time as a fallback Z for click commits
+        var tpPreviewCoords = null;
+
+        function getSeaChartFrame() {
+            return document.getElementById('seachart-map');
+        }
+
+        function postSeaChartMessage(type, payload) {
+            var frame = getSeaChartFrame();
+            if (!frame || !frame.contentWindow) return;
+            frame.contentWindow.postMessage({
+                source: 'WindrosePlusDashboard',
+                type: type,
+                payload: payload || {}
+            }, window.location.origin);
+        }
+
+        function postSeaChartTeleportState() {
+            postSeaChartMessage('teleport-armed', { armed: !!tpArmedPlayer });
+        }
+
+        function commitTeleportFromSeaChart(x, y) {
+            if (!tpArmedPlayer) return;
+            var player = tpArmedPlayer;
+            var fallbackZ = tpArmedPlayerZ;
+            disarmTeleport();
+
+            fetch('/api/terrain_height?x=' + encodeURIComponent(x) + '&y=' + encodeURIComponent(y))
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    var z;
+                    if (data && typeof data.z === 'number') {
+                        z = data.z >= 0 ? Math.round(data.z + 100) : 300;
+                    } else if (fallbackZ != null) {
+                        z = fallbackZ;
+                    } else {
+                        z = 300;
+                    }
+                    sendRconCommand('wp.tp ' + player + ' ' + x + ' ' + y + ' ' + z);
+                })
+                .catch(function() {
+                    var z = fallbackZ != null ? fallbackZ : 300;
+                    sendRconCommand('wp.tp ' + player + ' ' + x + ' ' + y + ' ' + z);
+                });
+        }
+
+        function armTeleport(playerName) {
+            if (!playerName) return;
+            // Toggle off if same player already armed
+            if (tpArmedPlayer === playerName) {
+                disarmTeleport();
+                return;
+            }
+            tpArmedPlayer = playerName;
+
+            // Reflect in the row UI immediately (the next /api/status refresh will also keep it).
+            document.querySelectorAll('.player-row').forEach(function(r) { r.classList.remove('tp-armed'); });
+            var row = document.querySelector('.player-row[data-player="' + (window.CSS && CSS.escape ? CSS.escape(playerName) : playerName) + '"]');
+            if (row) {
+                row.classList.add('tp-armed');
+                // Capture the player's current Z so we can fall back to it at click time
+                // if /api/terrain_height has no land data for the click point.
+                var pz = row.dataset.playerZ;
+                tpArmedPlayerZ = (pz !== '' && pz != null) ? parseInt(pz, 10) : null;
+            } else {
+                tpArmedPlayerZ = null;
+            }
+
+            // Auto-switch to SEA CHART tab and prep the map.
+            var seachartTab = document.querySelector('.dashboard-tab[data-tab="seachart"]');
+            if (seachartTab && !seachartTab.classList.contains('active')) {
+                seachartTab.click();
+            }
+            var mapEl = document.getElementById('seachart-map');
+            if (mapEl) mapEl.classList.add('tp-armed');
+
+            var banner = document.getElementById('tp-hint-banner');
+            if (banner) {
+                banner.innerHTML = 'Click the map to teleport <strong>' + escHtmlGlobal(playerName) + '</strong>'
+                    + '<span class="tp-hint-coords" id="tp-hint-coords"></span>'
+                    + '<span class="hint-key">ESC to cancel</span>';
+                banner.style.display = 'block';
+            }
+            postSeaChartTeleportState();
+        }
+
+        function disarmTeleport() {
+            tpArmedPlayer = null;
+            tpArmedPlayerZ = null;
+            tpPreviewCoords = null;
+            document.querySelectorAll('.player-row.tp-armed').forEach(function(r) { r.classList.remove('tp-armed'); });
+            // Restore any preview-styled position fields to the actual coords.
+            document.querySelectorAll('.player-pos.tp-preview').forEach(function(el) {
+                el.classList.remove('tp-preview');
+                if (el.dataset.origText != null) {
+                    el.textContent = el.dataset.origText;
+                    delete el.dataset.origText;
+                }
+            });
+            var mapEl = document.getElementById('seachart-map');
+            if (mapEl) mapEl.classList.remove('tp-armed');
+            var banner = document.getElementById('tp-hint-banner');
+            if (banner) banner.style.display = 'none';
+            postSeaChartTeleportState();
+        }
+
+        // Update the armed player's row coords + banner to reflect the cursor position.
+        // Called on map mousemove while armed. Stashes the original text on first call so
+        // we can restore it on mouseout / disarm.
+        function updateTeleportPreview(x, y) {
+            tpPreviewCoords = { x: x, y: y };
+            if (!tpArmedPlayer) return;
+            var sel = '.player-row[data-player="' + (window.CSS && CSS.escape ? CSS.escape(tpArmedPlayer) : tpArmedPlayer) + '"]';
+            var row = document.querySelector(sel);
+            if (row) {
+                var pos = row.querySelector('.player-pos');
+                if (pos) {
+                    if (pos.dataset.origText == null) pos.dataset.origText = pos.textContent;
+                    pos.textContent = x + ', ' + y;
+                    pos.classList.add('tp-preview');
+                }
+            }
+            var coordsEl = document.getElementById('tp-hint-coords');
+            if (coordsEl) coordsEl.textContent = '(' + x + ', ' + y + ')';
+        }
+
+        // Called when cursor leaves the map (or on disarm) — revert preview without
+        // clearing tpArmedPlayer (so a re-enter resumes the preview).
+        function clearTeleportPreview() {
+            tpPreviewCoords = null;
+            document.querySelectorAll('.player-pos.tp-preview').forEach(function(el) {
+                el.classList.remove('tp-preview');
+                if (el.dataset.origText != null) {
+                    el.textContent = el.dataset.origText;
+                    delete el.dataset.origText;
+                }
+            });
+            var coordsEl = document.getElementById('tp-hint-coords');
+            if (coordsEl) coordsEl.textContent = '';
+        }
+
+        function escHtmlGlobal(s) {
+            var d = document.createElement('div');
+            d.appendChild(document.createTextNode(String(s)));
+            return d.innerHTML;
+        }
+
+        // ESC anywhere disarms.
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape' && tpArmedPlayer) {
+                disarmTeleport();
+            }
+        });
+
+        window.addEventListener('message', function(e) {
+            if (e.origin !== window.location.origin) return;
+            var data = e.data || {};
+            if (data.source !== 'WindrosePlusLivemap') return;
+            var payload = data.payload || {};
+            if (data.type === 'map-hover' && tpArmedPlayer && typeof payload.x === 'number' && typeof payload.y === 'number') {
+                updateTeleportPreview(payload.x, payload.y);
+            } else if (data.type === 'map-leave' && tpArmedPlayer) {
+                clearTeleportPreview();
+            } else if (data.type === 'map-click' && tpArmedPlayer && typeof payload.x === 'number' && typeof payload.y === 'number') {
+                commitTeleportFromSeaChart(payload.x, payload.y);
+            }
+        });
+
+        document.querySelectorAll('.dashboard-tab').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                var tab = this.getAttribute('data-tab');
+                document.querySelectorAll('.dashboard-tab').forEach(function(b) { b.classList.remove('active'); });
+                this.classList.add('active');
+                document.querySelectorAll('.tab-content').forEach(function(p) { p.classList.remove('active'); });
+                document.getElementById(tab === 'console' ? 'console-pane' : 'seachart-pane').classList.add('active');
+
+                if (tab === 'seachart' && !seachartInitialized) {
+                    initSeaChart();
+                }
+                if (tab === 'seachart') {
+                    postSeaChartTeleportState();
+                }
+            });
+        });
+
+        var seachartInitializing = false;
+        function initSeaChart() {
+            // Reentrancy guard: a second tab click during the retry window would otherwise
+            // start a parallel fetch chain, duplicate the Leaflet map mount, and leak intervals.
+            if (seachartInitializing || seachartInitialized) return;
+            seachartInitializing = true;
+            var frame = getSeaChartFrame();
+            if (!frame) {
+                seachartInitializing = false;
+                return;
+            }
+            if (!frame.dataset.srcSet) {
+                frame.src = '/livemap?embed=1';
+                frame.dataset.srcSet = '1';
+                frame.addEventListener('load', function() {
+                    postSeaChartTeleportState();
+                });
+            }
+            seachartInitialized = true;
+            seachartInitializing = false;
+            postSeaChartTeleportState();
+            return;
+            // Manifest fetch with retry — first connect can race tile generation.
+            // Poll every 3s for up to 3 minutes before showing the not-ready notice.
+            var attempts = 0, maxAttempts = 60;
+            function fetchManifest() {
+                fetch("/api/mapinfo", {credentials: "same-origin"})
+                    .then(function(r) { return r.json(); })
+                    .then(function(mapInfo) {
+                        attempts++;
+                        var stillRunning = mapInfo && mapInfo.error && mapInfo.generation && mapInfo.generation.state === 'running';
+                        if (stillRunning && attempts < maxAttempts) {
+                            var holder = document.getElementById('seachart-map');
+                            if (holder && !holder.dataset.waitNotice) {
+                                holder.innerHTML = '';
+                                var notice = document.createElement('div');
+                                notice.style.cssText = 'display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-family:Cormorant Garamond,serif;font-size:1.2rem;text-align:center;padding:20px;';
+                                notice.textContent = 'Generating map tiles…';
+                                holder.appendChild(notice);
+                                holder.dataset.waitNotice = '1';
+                            }
+                            setTimeout(fetchManifest, 3000);
+                            return;
+                        }
+                        renderSeaChart(mapInfo);
+                    })
+                    .catch(function() {
+                        attempts++;
+                        if (attempts < maxAttempts) setTimeout(fetchManifest, 3000);
+                        else renderSeaChart({ error: 'Map not ready yet.' });
+                    });
+            }
+            fetchManifest();
+
+            function renderSeaChart(mapInfo) {
+                seachartInitializing = false;
+                var holder0 = document.getElementById('seachart-map');
+                if (holder0) delete holder0.dataset.waitNotice;
+                if (mapInfo.error) {
+                    seachartInitialized = false;
+                    var msg = mapInfo.error;
+                    if (mapInfo.generation) {
+                        if (mapInfo.generation.state === 'running') msg += ' Tile generation is currently running.';
+                        else if (mapInfo.generation.state === 'error') msg += ' Tile generation failed: ' + (mapInfo.generation.error || 'unknown error');
+                        else if (mapInfo.generation.state === 'complete') msg += ' Tile generation completed, but the map manifest is still missing.';
+                    }
+                    var holder = document.getElementById('seachart-map');
+                    holder.innerHTML = '';
+                    var notice = document.createElement('div');
+                    notice.style.cssText = 'display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-family:Cormorant Garamond,serif;font-size:1.2rem;text-align:center;padding:20px;';
+                    notice.textContent = msg;
+                    holder.appendChild(notice);
+                    return;
+                }
+                seachartInitialized = true;
+
+                var W = { minX: mapInfo.world_min_x, maxX: mapInfo.world_max_x, minY: mapInfo.world_min_y, maxY: mapInfo.world_max_y };
+                var SIDE = Math.max(W.maxX - W.minX, W.maxY - W.minY);
+                var maxZoom = mapInfo.max_zoom || 4;
+                var fx = 256 / SIDE, fy = 256 / SIDE;
+                var GameCRS = L.Util.extend({}, L.CRS.Simple, {
+                    transformation: new L.Transformation(fx, -W.minX * fx, fy, -W.minY * fy)
+                });
+                var IB;
+                if (mapInfo.island_bounds) {
+                    var ib = mapInfo.island_bounds;
+                    IB = L.latLngBounds([ib.min_y, ib.min_x], [ib.max_y, ib.max_x]);
+                } else {
+                    IB = L.latLngBounds([W.minY, W.minX], [W.maxY, W.maxX]);
+                }
+
+                seachartMap = L.map('seachart-map', {
+                    crs: GameCRS,
+                    minZoom: 0,
+                    maxZoom: maxZoom + 2,
+                    maxBounds: IB.pad(0.1),
+                    maxBoundsViscosity: 1.0,
+                    zoomSnap: 0.25,
+                    zoomDelta: 0.5,
+                    attributionControl: false
+                });
+
+                var tileBase = window.location.origin;
+                var tiles = L.tileLayer(tileBase + '/livemap/tiles/{z}/{x}-{y}.png', {
+                    minZoom: 0,
+                    maxZoom: maxZoom + 2,
+                    maxNativeZoom: maxZoom,
+                    tileSize: 256,
+                    noWrap: true,
+                    bounds: L.latLngBounds([W.minY, W.minX], [W.maxY, W.maxX]),
+                    // Truly transparent 1×1 RGBA PNG. The previous literal here decoded to
+                    // rgba(255,0,0,127) — Leaflet stretched it to fill every missing tile slot,
+                    // turning the whole map crimson whenever a zoom level had no rendered tiles.
+                    errorTileUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNgYGBgAAAABQABeqhXUAAAAABJRU5ErkJggg=='
+                });
+                tiles.addTo(seachartMap);
+
+                // Tile generation may finish AFTER initial layer mount on a fresh world.
+                // Poll mapinfo every 10s, redrawing the layer until generation reports complete.
+                (function() {
+                    var ticks = 0, maxTicks = 60;
+                    var iv = setInterval(function() {
+                        ticks++;
+                        fetch('/api/mapinfo', {credentials: 'same-origin'})
+                            .then(function(r) { return r.ok ? r.json() : null; })
+                            .then(function(m) {
+                                if (m && m.generation && m.generation.state === 'complete') {
+                                    tiles.redraw();
+                                    clearInterval(iv);
+                                    return;
+                                }
+                                tiles.redraw();
+                                if (ticks >= maxTicks) clearInterval(iv);
+                            })
+                            .catch(function() {
+                                if (ticks >= maxTicks) clearInterval(iv);
+                            });
+                    }, 10000);
+                })();
+
+                seachartMap.fitBounds(IB);
+
+                var playerLayer = L.layerGroup().addTo(seachartMap);
+                var mobLayer = L.layerGroup().addTo(seachartMap);
+
+                // Live preview: as the cursor moves while armed, mirror the hover point
+                // into the player row's coords field and the hint banner.
+                seachartMap.on('mousemove', function(e) {
+                    if (!tpArmedPlayer) return;
+                    updateTeleportPreview(Math.round(e.latlng.lng), Math.round(e.latlng.lat));
+                });
+                seachartMap.on('mouseout', function() {
+                    if (!tpArmedPlayer) return;
+                    clearTeleportPreview();
+                });
+
+                // Click-to-teleport. Active only when a player is armed via the TELEPORT
+                // button in the player list. Leaflet's CRS already maps lat/lng to world
+                // Y/X 1:1 (see L.marker(L.latLng(p.y, p.x)) below), so click coords are
+                // world coords directly — no projection math.
+                //
+                // For Z: we ask /api/terrain_height to sample the exported heightmap at
+                // (X, Y). Sea level is Z=0 in Windrose's heightfield. Different clearances
+                // for land vs water:
+                //   - terrain Z >= 0 (dry land): land 1m above terrain — small offset so
+                //     mountain/grass clicks don't make the player visibly drop
+                //   - terrain Z < 0 (shoreline / underwater): float 3m above sea level —
+                //     the pawn capsule extends below the feet pivot and water shaders
+                //     make even +1m look "in water", so we need more clearance
+                //
+                // We ALWAYS send a Z (never the 3-arg `wp.tp <name> <x> <y>` form). When
+                // terrain data is unavailable (ocean / out-of-bounds / pre-heightmap-export
+                // / endpoint unreachable) we fall back to the armed player's current Z
+                // captured at arm time. This avoids an arg-parser ambiguity in wp.tp where
+                // a numeric or numeric-suffix player name could be misread as a coord.
+                function commitTeleport(player, x, y, z) {
+                    sendRconCommand('wp.tp ' + player + ' ' + x + ' ' + y + ' ' + z);
+                }
+
+                seachartMap.on('click', function(e) {
+                    if (!tpArmedPlayer) return;
+                    var x = Math.round(e.latlng.lng);
+                    var y = Math.round(e.latlng.lat);
+                    var player = tpArmedPlayer;
+                    var fallbackZ = tpArmedPlayerZ;  // captured at arm time
+                    disarmTeleport();
+
+                    fetch('/api/terrain_height?x=' + x + '&y=' + y)
+                        .then(function(r) { return r.json(); })
+                        .then(function(data) {
+                            var z;
+                            if (data && typeof data.z === 'number') {
+                                z = data.z >= 0
+                                    ? Math.round(data.z + 100)
+                                    : 300;
+                            } else if (fallbackZ != null) {
+                                // Terrain data unavailable — keep player at their current Z.
+                                z = fallbackZ;
+                            } else {
+                                // Last resort: float just above sea level.
+                                z = 300;
+                            }
+                            commitTeleport(player, x, y, z);
+                        })
+                        .catch(function() {
+                            // Endpoint unreachable — fall back to player's current Z, or
+                            // a sea-level float if that's somehow missing too.
+                            var z = fallbackZ != null ? fallbackZ : 300;
+                            commitTeleport(player, x, y, z);
+                        });
+                });
+
+                function escHtml(s) { var d = document.createElement('div'); d.appendChild(document.createTextNode(s)); return d.innerHTML; }
+
+                function fetchMapEntities() {
+                    fetch('/api/livemap').then(function(r) { return r.json(); }).then(function(data) {
+                        playerLayer.clearLayers();
+                        if (data.players) {
+                            data.players.forEach(function(p) {
+                                if (p.x === undefined || p.y === undefined) return;
+                                var icon = L.divIcon({
+                                    className: '',
+                                    html: '<div style="width:14px;height:14px;border-radius:50%;background:#fff;border:2px solid #c9a959;box-shadow:0 0 8px rgba(212,160,74,0.5);"></div><div style="position:absolute;top:18px;left:50%;transform:translateX(-50%);white-space:nowrap;font-size:11px;color:#ede0cc;font-family:IBM Plex Mono,monospace;text-shadow:0 1px 3px rgba(0,0,0,0.8);">' + escHtml(p.name || 'Player') + '</div>',
+                                    iconSize: [14, 14], iconAnchor: [7, 7]
+                                });
+                                L.marker(L.latLng(p.y, p.x), { icon: icon }).addTo(playerLayer);
+                            });
+                        }
+                        mobLayer.clearLayers();
+                        if (data.mobs) {
+                            data.mobs.forEach(function(m) {
+                                if (m.x === undefined || m.y === undefined) return;
+                                var icon = L.divIcon({
+                                    className: '',
+                                    html: '<div style="width:8px;height:8px;border-radius:50%;background:#cc5544;border:1px solid #aa3322;" title="' + escHtml(m.name || 'Mob') + '"></div>',
+                                    iconSize: [8, 8], iconAnchor: [4, 4]
+                                });
+                                L.marker(L.latLng(m.y, m.x), { icon: icon }).addTo(mobLayer);
+                            });
+                        }
+                    }).catch(function() {});
+                }
+
+                fetchMapEntities();
+                setInterval(fetchMapEntities, 5000);
+            }
+        }
+    </script>
+
+    <div class="modal-overlay" id="repair-modal" role="dialog" aria-modal="true" aria-labelledby="repair-modal-title">
+        <div class="modal-shell">
+            <div class="modal-titlebar">
+                <h2 class="modal-title" id="repair-modal-title">Character <span class="accent">Repair</span></h2>
+                <button type="button" class="modal-close" id="repair-modal-close" aria-label="Close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p>Fixes the known Windrose progression drift where a character crashes the server on join with <code>RewardLevel &lt; CurrentLevel</code>. Runs against a copy of your uploaded save and returns a repaired zip.</p>
+                <ol>
+                    <li>Close Windrose. Check Task Manager if needed.</li>
+                    <li>Open <code>%LOCALAPPDATA%\R5\Saved\SaveProfiles\</code>.</li>
+                    <li>Right-click your long-number SteamID folder and create a zip.</li>
+                    <li>Choose that zip below. Do not upload the server world save.</li>
+                    <li>After download, extract the repaired zip back into <code>SaveProfiles</code> and replace the existing files.</li>
+                </ol>
+                <div class="modal-upload">
+                    <input id="repair-file" type="file" accept=".zip,application/zip">
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="modal-btn" id="repair-submit">Repair Save Zip</button>
+                </div>
+                <div id="repair-status" class="modal-status"></div>
+                <p class="modal-warning">Max upload 200 MB. Safe mode only fixes no-spend progression drift. Anything else, the tool refuses instead of guessing.</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        (function() {
+            var openBtn = document.getElementById('open-repair-modal');
+            var modal = document.getElementById('repair-modal');
+            var closeBtn = document.getElementById('repair-modal-close');
+            var fileInput = document.getElementById('repair-file');
+            var submitBtn = document.getElementById('repair-submit');
+            var statusBox = document.getElementById('repair-status');
+            var lastUrl = null;
+
+            function setStatus(kind, text) {
+                statusBox.className = 'modal-status ' + (kind || '');
+                statusBox.textContent = text || '';
+            }
+            function clearDownload() {
+                if (lastUrl) { URL.revokeObjectURL(lastUrl); lastUrl = null; }
+            }
+            function openModal() {
+                modal.classList.add('active');
+                setTimeout(function() { fileInput.focus(); }, 30);
+            }
+            function closeModal() {
+                modal.classList.remove('active');
+                clearDownload();
+                setStatus('', '');
+                if (fileInput) fileInput.value = '';
+                submitBtn.disabled = false;
+            }
+
+            if (openBtn) openBtn.addEventListener('click', openModal);
+            if (closeBtn) closeBtn.addEventListener('click', closeModal);
+            modal.addEventListener('click', function(e) { if (e.target === modal) closeModal(); });
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'Escape' && modal.classList.contains('active')) closeModal();
+            });
+
+            submitBtn.addEventListener('click', async function(e) {
+                e.preventDefault();
+                clearDownload();
+
+                var file = fileInput.files && fileInput.files[0];
+                if (!file) { setStatus('err', 'Choose a SaveProfiles zip first.'); return; }
+                if (!file.name.toLowerCase().endsWith('.zip')) { setStatus('err', 'Upload a .zip file.'); return; }
+                if (file.size > 200 * 1024 * 1024) { setStatus('err', 'That zip is larger than 200 MB.'); return; }
+
+                submitBtn.disabled = true;
+                setStatus('busy', 'Repairing uploaded save. Do not close this dialog…');
+
+                try {
+                    var res = await fetch('/api/character-repair', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/zip' },
+                        body: file,
+                        credentials: 'same-origin'
+                    });
+
+                    if (!res.ok) {
+                        var detail = '';
+                        try { var data = await res.json(); detail = data.detail || data.error || ''; }
+                        catch (parseErr) { try { detail = await res.text(); } catch (textErr) { detail = ''; } }
+                        setStatus('err', detail || 'No safe automatic repair was made.');
+                        return;
+                    }
+
+                    var blob = await res.blob();
+                    lastUrl = URL.createObjectURL(blob);
+
+                    var a = document.createElement('a');
+                    a.href = lastUrl;
+                    a.download = 'windrose-save-repaired.zip';
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+
+                    setStatus('ok', 'Repair complete. Your browser downloaded windrose-save-repaired.zip. Extract it into %LOCALAPPDATA%\\R5\\Saved\\SaveProfiles\\ and replace the old files before joining again.');
+                } catch (e) {
+                    setStatus('err', 'Repair request failed: ' + e.message);
+                } finally {
+                    submitBtn.disabled = false;
+                }
+            });
+        })();
+    </script>
+</body>
+</html>
