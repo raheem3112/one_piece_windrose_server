@@ -1,15 +1,12 @@
 # Windrose Dedicated Server settings
 
-## Content
+## Contents
 - [Hardware requirements](#hardware-requirements)
 - [Easy Start](#easy-start)
 - [Server Settings](#server-settings)
   - [ServerDescription.json](#serverdescriptionjson)
   - [WorldDescription.json](#worlddescriptionjson)
-- [Direct IP Connection Scenarios](#direct-ip-connection-scenarios)
-  - [Players on Different Networks](#players-on-different-networks)
-  - [Players on the Same Local Network (LAN)](#players-on-the-same-local-network-lan)
-  - [Troubleshooting Direct IP Connections](#troubleshooting-direct-ip-connections)
+  - [Direct IP Connection Scenarios](#direct-ip-connection-scenarios)
 
 
 ## Hardware requirements
@@ -27,44 +24,45 @@
 - Storage: 35 GB SSD
 
 ## Easy Start
-If you just want a simple way to start the server on your PC, here are some quick instructions:
+If you just want a simple way to start the server on your PC, follow these quick instructions:
 
-1. Start the Windrose Dedicated Server on your platform of choice or via StartServerForeground.bat.
-2. You will see a console window appear on your screen.
-3. Once it finishes loading, you should see an invite code that looks something like this: `f1014dc1`
-4. If you cannot find it (sometimes the console messages disappear too quickly), do not worry. Go to the folder where you installed the Windrose Dedicated Server, then open the `R5` folder. Inside the `R5` folder, you will find the `ServerDescription.json` file. Open it with any text editor (simple Notepad will do). Inside this file, look for the invite code. It will look something like this: `f1014dc1`
-5. Now you can launch the game itself. Go to **Play → Connect to Server →** paste the invite code there. You should now be able to see the server and connect to it.
-6. Send the invite code to your friends, and they should be able to connect to the server as well (**Play → Connect to Server →** paste the invite code).
+1. Start the Windrose Dedicated Server on your platform of choice, or via `StartServerForeground.bat`.
+2. A console window will appear on your screen.
+3. Once it finishes loading, you should see an invite code that looks something like this: `f1014dc1`.
+4. If you cannot find it (the console messages sometimes disappear too quickly), do not worry. Go to the folder where you installed the Windrose Dedicated Server, then open the `R5` folder. Inside it you will find the `ServerDescription.json` file. Open it with any text editor (plain Notepad will do) and look for the invite code. It will look something like this: `f1014dc1`.
+5. Now you can launch the game itself. Go to **Play → Connect to Server** and paste the invite code there. You should now be able to see the server and connect to it.
+6. Send the invite code to your friends, and they should be able to connect to the server as well (**Play → Connect to Server**, paste the invite code).
 7. Yarr!
 
-If you want to change your server settings or need more technical details, please look below:
+If you want to change your server settings or need more technical details, see the sections below.
 
 ## Server Settings
-We split server settings into 2 separate .json files. The first one is ServerDescription.json for common server settings. There can be only one such file regardless of the number of worlds. The file is located in root folder of the application. The second one is WorldDescription.json. There is one file of this type per world.
+Server settings are split into two separate JSON files. The first one is `ServerDescription.json`, which holds common server settings. There can be only one such file regardless of the number of worlds, and it is located in the root folder of the application. The second one is `WorldDescription.json` — one file of this type exists per world.
 
-Server creates default version of ServerDescription.json and makes first World with WorldDescription.json on initial start, so it is recommended to start and stop the server so the files are created and then work with them.
+On initial start, the server creates a default `ServerDescription.json` and a first world with its `WorldDescription.json`. It is therefore recommended to start and stop the server once so that the files are generated, and then edit them.
 
 ### ServerDescription.json
 This is a single file in the root folder of the application.
 
 List of fields:
 
-1. PersistentServerId - unique ID of your server. Do not edit it. **_It will be changed in upcoming builds_**
-2. InviteCode - invite code to find your server. 0-9, a-z and A-Z symbols are allowed. Should contain at least 6 symbols. Case sensitive.
-3. IsPasswordProtected - specify if password is required. Should be true if password specified and false if password field is empty. Otherwise it may cause unexpected behavior.
-4. Password - this is the password.
-5. ServerName - name of your server. Helpful if invite codes look similar
-6. WorldIslandId - ID of currently selected world. It should be the same as a similar field in one of WorldDescription.json file of the server. This world will be loaded on start of the server.
-7. MaxPlayerCount - maximum number of simultaneous players on your server.
-8. UserSelectedRegion - specifies the region for the Connection Service. Supported options: SEA, CIS, EU (EU covers both EU & NA). If left empty, the server will automatically detect and select the optimal region based on latency. If desired region is specified (for example, EU), the server will use that region exclusively.
-9. P2pProxyAddress - IP Address for listening sockets.
-10. UseDirectConnection - if true, the server will create sockets for direct connection with clients. If false, the server will use ICE protocol to establish P2P connection.
-11. DirectConnectionServerAddress - address for direct connection. For future purposes. Not used now.
-12. DirectConnectionServerPort - port for direct connection. Should be available for TCP and UDP connection if UseDirectConnection is true.
-13. DirectConnectionProxyAddress - сan be used to choose specified network on computer where server with direct connection is running. 0.0.0.0 should be used by default.
-14. AutoLoadLatestBackupIfHasBroken - if set to true, on launch the server will try to restore broken save files from backups, as described in SaveWorkflow.md
+1. PersistentServerId — unique ID of your server. Do not edit it. **_It will be changed in upcoming builds._**
+2. InviteCode — invite code used to find your server. Allowed characters: `0-9`, `a-z`, and `A-Z`. Must contain at least 6 characters. Case sensitive.
+3. IsPasswordProtected — specifies whether a password is required. Should be `true` if a password is set and `false` if the `Password` field is empty. Otherwise it may cause unexpected behavior.
+4. Password — the server password.
+5. ServerName — name of your server. Helpful when invite codes look similar.
+6. WorldIslandId — ID of the currently selected world. Must match the corresponding field in one of the server's `WorldDescription.json` files. This world will be loaded when the server starts.
+7. MaxPlayerCount — maximum number of simultaneous players on your server.
+8. UserSelectedRegion — region for the Connection Service. Supported options: `SEA`, `CIS`, `EU` (EU covers both EU and NA). If left empty, the server will automatically detect and select the optimal region based on latency. If a region is specified (for example, `EU`), the server will use that region exclusively.
+9. P2pProxyAddress — IP address for listening sockets.
+10. UseDirectConnection — if `true`, the server will create sockets for direct connections with clients. If `false`, the server will use the ICE protocol to establish a P2P connection.
+11. DirectConnectionServerAddress — address for direct connection. Reserved for future use. Not used currently.
+12. DirectConnectionServerPort — port for direct connection. Must be available for TCP and UDP connections if `UseDirectConnection` is `true`.
+13. DirectConnectionProxyAddress — can be used to select a specific network on the computer where the server with direct connection is running. `0.0.0.0` is the default.
+14. AutoLoadLatestBackupIfHasBroken — if set to `true`, on launch the server will try to restore broken save files from backups, as described in `SaveWorkflow.md`.
+15. CanLaunchMultipleServerInstances — `false` by default, to prevent launching multiple instances of the game server on the same PC. This is an additional safeguard against data corruption when multiple copies of the application work with the same database.
 
-This file can be changed manually only when the server is shut down. Any field might be automatically changed by the server in case of any issue.
+This file can be edited manually only when the server is shut down. Any field may be automatically changed by the server in the event of an issue.
 
 Example:
 ```json
@@ -83,43 +81,45 @@ Example:
 		"UserSelectedRegion": "EU",
 		"P2pProxyAddress": "192.168.31.49",
 		"UseDirectConnection": false,
-        "DirectConnectionServerAddress ": "",
+		"DirectConnectionServerAddress": "",
 		"DirectConnectionServerPort": 7777,
-        "DirectConnectionProxyAddress": "0.0.0.0",
-		"AutoLoadLatestBackupIfHasBroken": true
+		"DirectConnectionProxyAddress": "0.0.0.0",
+		"AutoLoadLatestBackupIfHasBroken": true,
+		"CanLaunchMultipleServerInstances": false
 	}
 }
 ```
 
 
 ### WorldDescription.json
-You can create as many worlds as you need on your server. All worlds are located in a folder
+You can create as many worlds as you need on your server. All worlds are located under:
 
-`<root folder>/R5/Saved/SaveProfiles/Default/RocksDB/<game version>/Worlds/<world document id>/WorldDescription.json`
+`<root folder>/R5/Saved/SaveProfiles/Default/RocksDB_v2/<game version>/Worlds/<world document id>/WorldDescription.json`
 
-First one is created automatically on start of a server.
+The first one is created automatically when the server starts.
 
-Pay attention that the WorldIslandId must be the same as a similar field in WorldSettings.json located in this folder.
+Note that `WorldIslandId` in `ServerDescription.json` must match the `IslandId` field in the `WorldDescription.json` of the world you want loaded.
 
 List of fields:
 
-1. IslandId - unique ID of the world. Must be the same as folder name where the file is located.
-2. WorldName - Name of the world.
-3. CreationTime - time of creation in internal format.
-4. WorldPresetType - gameplay difficulty preset. You can use these values: "Easy", "Medium", "Hard". If any custom values present in "WorldSettings", the preset will be forcefully set to "Custom" on next server launch.
-5. WorldSettings - world parameters grouped by types: bool, float and tag. Should be empty for all preserts except "Custom"
+1. IslandId — unique ID of the world. Must match the name of the folder containing the file.
+2. WorldName — name of the world.
+3. CreationTime — creation time in internal format.
+4. WorldPresetType — gameplay difficulty preset. Accepted values: `"Easy"`, `"Medium"`, `"Hard"`. If any custom values are present in `WorldSettings`, the preset will be forced to `"Custom"` on the next server launch.
+5. WorldSettings — world parameters grouped by type: `bool`, `float`, and `tag`. Should be empty for all presets except `"Custom"`.
 
-List of available world parameters for custom preset. Please note it might be easier to set up the custom server preset in the game and then copy them to a dedicated server file manually: **_Parameters list and their values/ranges might be changed in upcoming builds_**
-1. CoopQuests: If any player on the server completes a quest marked as a co-op quest, it auto-completes for all players who currently have it active; Default: true;
-2. EasyExplore: When this option is set true it disables markers on the map that highlight points of interest making them harder to find; Default: false; The "EasyExplore" is the legacy name, in-game it is called "Immersive exploration" and in fact, it makes exploration harder.
-3. MobHealthMultiplier: Defines how much Health enemies have; Default: 1.0; Range: [0.2; 5.0];
-4. MobDamageMultiplier: Defines how hard enemies hit; Default: 1.0; Range: [0.2; 5.0];
-5. ShipHealthMultiplier: Defines how much Ship Health enemy ships have; Default: 1.0; Range: [0.4; 5.0];
-6. ShipDamageMultiplier: Defines how much Damage enemy ships deal; Default: 1.0; Range: [0.2; 2.5];
-7. BoardingDifficultyMultiplier: Defines how many enemy sailors must be defeated to win a boarding action; Default: 1.0; Range: [0.2; 5.0];
-8. Coop_StatsCorrectionModifier: Adjusts enemy Health and how fast enemies lose Posture based on the number of players on the server; Default: 1.0; Range: [0.0; 2.0];
-9. Coop_ShipStatsCorrectionModifier: Adjusts enemy Ship Health based on the number of players on the server; Default: 0.0; Range: [0.0; 2.0];
-10. CombatDifficulty: Defines how difficult are boss encounters and how aggressive are enemies in general; Default: {"TagName": "WDS.Parameter.CombatDifficulty.Normal"}; Range: {TagName="WDS.Parameter.CombatDifficulty.Easy"},{TagName="WDS.Parameter.CombatDifficulty.Normal"},{TagName="WDS.Parameter.CombatDifficulty.Hard"} ;
+List of available world parameters for the custom preset. Note that it may be easier to set up a custom preset in the game and then copy the resulting values to the dedicated server file manually. **_The parameter list and its value ranges may change in upcoming builds._**
+Each parameter name below shows the friendly label followed by the actual tag suffix used in JSON (the full tag is `WDS.Parameter.<suffix>`).
+1. CoopQuests (`Coop.SharedQuests`): If any player on the server completes a quest marked as a co-op quest, it auto-completes for all players who currently have it active. Default: `true`.
+2. EasyExplore (`EasyExplore`): When set to `true`, disables map markers that highlight points of interest, making them harder to find. Default: `false`. Note: "EasyExplore" is the legacy name; in-game it is called "Immersive exploration" and, in effect, makes exploration harder.
+3. MobHealthMultiplier (`MobHealthMultiplier`): Defines how much Health enemies have. Default: `1.0`. Range: `[0.2; 5.0]`.
+4. MobDamageMultiplier (`MobDamageMultiplier`): Defines how hard enemies hit. Default: `1.0`. Range: `[0.2; 5.0]`.
+5. ShipHealthMultiplier (`ShipsHealthMultiplier`): Defines how much Ship Health enemy ships have. Default: `1.0`. Range: `[0.4; 5.0]`.
+6. ShipDamageMultiplier (`ShipsDamageMultiplier`): Defines how much Damage enemy ships deal. Default: `1.0`. Range: `[0.2; 2.5]`.
+7. BoardingDifficultyMultiplier (`BoardingDifficultyMultiplier`): Defines how many enemy sailors must be defeated to win a boarding action. Default: `1.0`. Range: `[0.2; 5.0]`.
+8. CoopStatsCorrectionModifier (`Coop.StatsCorrectionModifier`): Adjusts enemy Health and how fast enemies lose Posture, based on the number of players on the server. Default: `1.0`. Range: `[0.0; 2.0]`.
+9. CoopShipStatsCorrectionModifier (`Coop.ShipStatsCorrectionModifier`): Adjusts enemy Ship Health based on the number of players on the server. Default: `0.0`. Range: `[0.0; 2.0]`.
+10. CombatDifficulty (`CombatDifficulty`): Defines how difficult boss encounters are and how aggressive enemies are in general. Default: `{"TagName": "WDS.Parameter.CombatDifficulty.Normal"}`. Allowed values: `{"TagName": "WDS.Parameter.CombatDifficulty.Easy"}`, `{"TagName": "WDS.Parameter.CombatDifficulty.Normal"}`, `{"TagName": "WDS.Parameter.CombatDifficulty.Hard"}`.
 
 Example "WorldPresetType": "Medium":
 ```json
@@ -127,7 +127,7 @@ Example "WorldPresetType": "Medium":
     "Version": 1,
     "WorldDescription":
     {
-        "islandId": "E24A22C9C8D3448951AFD002162576D5",
+        "IslandId": "E24A22C9C8D3448951AFD002162576D5",
         "WorldName": "The Archipelago",
         "CreationTime": 6.3910902400911002e+17,
         "WorldPresetType": "Medium",
@@ -166,7 +166,7 @@ Example "WorldPresetType": "Easy":
     "Version": 1,
     "WorldDescription":
     {
-        "islandId": "26C14DC8A78D4AF69E9C77527C934CF3",
+        "IslandId": "26C14DC8A78D4AF69E9C77527C934CF3",
         "WorldName": "The Archipelago",
         "CreationTime": 6.3911887576664998e+17,
         "WorldPresetType": "Easy",
@@ -205,7 +205,7 @@ Example "WorldPresetType": "Hard":
     "Version": 1,
     "WorldDescription":
     {
-        "islandId": "26C14DC8A78D4AF69E9C77527C934CF3",
+        "IslandId": "26C14DC8A78D4AF69E9C77527C934CF3",
         "WorldName": "The Archipelago",
         "CreationTime": 6.3911887576664998e+17,
         "WorldPresetType": "Hard",
@@ -238,69 +238,85 @@ Example "WorldPresetType": "Hard":
 }
 ```
 
-#### Direct IP Connection Scenarios
- There are two common setups for Direct IP connections, depending on whether players are on the same local network or connecting over the internet.
- 
-#### Players on Different Networks
-(Different Routers / Different Homes)
- 
-Example: each player is connecting from their own home internet connection.
- 
-In this scenario, the person hosting the server must have a public external IP address assigned to their router.
-Some internet providers offer this as a paid service.
- 
-The host must configure port forwarding on their router using the following logic:
- 
-    external_ip:external_port (TCP + UDP)
-            →
-    internal_ip:gameserver_port (TCP + UDP)
- 
-Both TCP and UDP forwarding are required.
- 
-Definitions:
-1) external_ip – Public IP address assigned to the router by the ISP
-2) external_port – Port configured in router port forwarding settings
-3) internal_ip – Local IP address of the computer running the dedicated server
-4) gameserver_port – Port selected in the server UI when launching the server
+#### Updating World Settings in WorldDescription.json for Dedicated Server
+To change `WorldDescription.json` settings on a Dedicated Server, follow these steps:
+1. Stop the `WindroseServer` application.
+2. Make the necessary changes to the `WorldDescription.json` file of the selected world inside the `Saved\SaveProfile\Default\RocksDB_v2` folder.
+3. Locate the `R5WorldDescriptionUpdater.exe` file in the server root folder.
+4. Open Command Prompt and navigate to that folder.
+5. Run the updater with the path to the selected world’s `WorldDescription.json` file.
+```
+R5WorldDescriptionUpdater.exe <path_to_world>\WorldDescription.json
+```
 
-How it works
-Connections made to the router’s public IP and forwarded port are redirected to the local machine running the server.
- 
+For example:
+```
+R5WorldDescriptionUpdater.exe R5\Saved\SaveProfiles\Default\RocksDB_v2\0.10.0\Worlds\796AE3C6113C451DE5BD791D70E4A52B\WorldDescription.json
+```
+
+### Direct IP Connection Scenarios
+There are two common setups for Direct IP connections, depending on whether the players are on the same local network or connecting over the internet.
+
+#### Players on Different Networks
+(Different routers / different homes.)
+
+Example: each player connects from their own home internet connection.
+
+In this scenario, the person hosting the server must have a public external IP address assigned to their router. Some internet providers offer this as a paid service.
+
+The host must configure port forwarding on their router using the following mapping:
+
+    external_ip:external_port (TCP + UDP)
+    internal_ip:gameserver_port (TCP + UDP)
+
+Both TCP and UDP forwarding are required.
+
+Definitions:
+1. `external_ip` — public IP address assigned to the router by the ISP.
+2. `external_port` — port configured in the router's port forwarding settings.
+3. `internal_ip` — local IP address of the computer running the dedicated server.
+4. `gameserver_port` — port selected in the server UI when launching the server.
+
+How it works:
+Connections made to the router's public IP and forwarded port are redirected to the local machine running the server.
+
 Example:
+
     203.0.113.25:17777
-            →
     192.168.1.100:7777
-The host then shares their:
-1) Public IP address
-2) Forwarded port
+
+The host then shares:
+1. Their public IP address.
+2. The forwarded port.
+
 The second player connects using that IP and port in the game client.
- 
+
 #### Players on the Same Local Network (LAN)
 Example: two players in the same house using the same router.
- 
+
 In this case:
-1) No public IP is required
-2) No port forwarding is required
-The host simply launches the server and selects a port in the server UI.
- 
-The host then shares:
-1) The local IP address of the server machine
-2) The selected server port
+1. No public IP is required.
+2. No port forwarding is required.
+
+The host simply launches the server and selects a port in the server UI, then shares:
+1. The local IP address of the server machine.
+2. The selected server port.
+
 The second player connects using the local IP and port.
- 
+
 Example:
+
     192.168.1.100:7777
- 
+
 #### Troubleshooting Direct IP Connections
 If connection problems occur, try the following:
-1) Verify the server IP address using: ipconfig
-2) Run this on the machine hosting the server.
-3) Try changing the port from 7777 to a higher alternative such as:
-    17777
-    27890
-    Any unused port below 65000
-4) Temporarily disable Windows Firewall
-5) Ensure the game client has permission to access the network
-6) Temporarily disable antivirus software
-7) Confirm that both TCP and UDP traffic are allowed for the selected port
-8) Make sure the server is fully started before attempting to connect
+1. Verify the server IP address using `ipconfig`. Run this on the machine hosting the server.
+2. Try changing the port from `7777` to a higher alternative, such as:
+    - `17777`
+    - `27890`
+    - any unused port below `65000`.
+3. Temporarily disable Windows Firewall.
+4. Ensure the game client has permission to access the network.
+5. Temporarily disable antivirus software.
+6. Confirm that both TCP and UDP traffic are allowed for the selected port.
+7. Make sure the server is fully started before attempting to connect.
